@@ -13,7 +13,6 @@
     />
     <link rel="stylesheet" href="style.css" />
     <title>Grocery Tracker</title>
-    <link rel="stylesheet" href="styles.css">
     
   </head>
   <body>
@@ -57,20 +56,31 @@
             <option value="current">Currently Available</option>
             <option value="need">Need to Buy</option>
           </select>
-          <input
-            type="date"
-            class="form-input"
-            id="expiry-input"
-            name="expiry"
-          />
-          <input
-            type="number"
-            class="form-input"
-            id="price-input"
-            name="price"
-            placeholder="Price per item"
-            step="0.01"
-          />
+          <div class="date-container">
+            <label for="expiry-input">Expiration Date</label>
+            <input
+              type="date"
+              class="form-input"
+              id="expiry-input"
+              name="expiry"
+            />
+          </div>
+          <div class="price-container">
+            <div class="price-input-group">
+              <input
+                type="number"
+                class="form-input"
+                id="price-input"
+                name="price"
+                placeholder="Price per item"
+                step="0.01"
+              />
+              <div class="unknown-price">
+                <input type="checkbox" id="unknown-price-checkbox" />
+                <label for="unknown-price-checkbox">Price Unknown</label>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="form-control">
           <button type="submit" class="btn">
