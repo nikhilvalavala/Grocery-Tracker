@@ -40,15 +40,17 @@ function init() {
 
   // Add status change event listener
   statusInput.addEventListener('change', function() {
-      if (this.value === 'current') {
-          document.querySelector('.date-container').style.display = 'block';
-          document.querySelector('.price-container').style.display = 'none';
+      const isCurrentStatus = this.value === 'current';
+      document.querySelector('.date-container').style.display = isCurrentStatus ? 'block' : 'none';
+      document.querySelector('.price-container').style.display = isCurrentStatus ? 'none' : 'flex';
+      
+      // Clear the irrelevant inputs
+      if (isCurrentStatus) {
           priceInput.value = '';
           unknownPriceCheckbox.checked = false;
       } else {
-          document.querySelector('.date-container').style.display = 'none';
-          document.querySelector('.price-container').style.display = 'flex';
           expiryInput.value = '';
+          noExpiryCheckbox.checked = false;
       }
   });
 
@@ -84,26 +86,24 @@ function init() {
       const itemQuantity = parseInt(quantityInput.value);
       const itemStatus = statusInput.value;
       const noExpiry = noExpiryCheckbox.checked;
-      const itemExpiry = (statusInput.value === 'current' && !noExpiry) ? expiryInput.value : '';
-      const isUnknownPrice = statusInput.value === 'need' && unknownPriceCheckbox.checked;
+      const itemExpiry = (itemStatus === 'current' && !noExpiry) ? expiryInput.value : '';
+      const isUnknownPrice = itemStatus === 'need' && unknownPriceCheckbox.checked;
       const itemPrice = isUnknownPrice ? 0 : parseFloat(priceInput.value) || 0;
 
       // Validate expiry date for items that need it
       if (itemStatus === 'current' && !noExpiry && !itemExpiry) {
-          alert('Please enter an expiration date or check "No Expiration Date".');
+          alert('Please enter an expiration date or check "Expiry N/A".');
           return;
       }
 
       // Validate price for need to buy items
-      if (itemStatus === 'need' && !isUnknownPrice) {
-          if (priceInput.value === '' || parseFloat(priceInput.value) < 0) {
-              alert('Please enter a valid price or check "Price Unknown".');
-              return;
-          }
+      if (itemStatus === 'need' && !isUnknownPrice && !itemPrice) {
+          alert('Please enter a valid price or check "Price Unknown".');
+          return;
       }
 
       // Check for duplicates based on status
-      if (isDuplicateItem(itemName, itemStatus) && !isEditMode) {
+      if (!isEditMode && isDuplicateItem(itemName, itemStatus)) {
           alert('This item already exists in Currently Available Groceries. Please update the existing item or add a different item.');
           return;
       }
@@ -111,14 +111,14 @@ function init() {
       if (isEditMode) {
           if (editItem) {
               editItemInDOM(itemName, itemQuantity, itemStatus, itemExpiry, itemPrice);
-              updateLocalStorage(itemName, itemQuantity, itemStatus);
+              updateLocalStorage(itemName, itemQuantity, itemStatus, itemExpiry, itemPrice);
               editItem.classList.remove('edit-mode-item');
           }
           isEditMode = false;
           editItem = null;
       } else {
           addItemToDOM(itemName, itemQuantity, itemStatus, itemExpiry, itemPrice);
-          addItemToLocalStorage(itemName, itemQuantity, itemStatus);
+          addItemToLocalStorage(itemName, itemQuantity, itemStatus, itemExpiry, itemPrice);
       }
 
       // Reset form
@@ -146,27 +146,28 @@ function init() {
       statusInput.value = isCurrentItem ? 'current' : 'need';
       
       if (isCurrentItem) {
-          expiryInput.style.display = 'block';
-          priceInput.style.display = 'none';
+          document.querySelector('.date-container').style.display = 'block';
+          document.querySelector('.price-container').style.display = 'none';
+          
           const expiryText = item.querySelector('.item-expiry')?.textContent;
           if (expiryText) {
-              if (expiryText.includes('No Expiration Date')) {
+              if (expiryText.includes('N/A')) {
                   noExpiryCheckbox.checked = true;
-                  expiryInput.disabled = true;
-                  expiryInput.style.backgroundColor = '#f5f5f5';
                   expiryInput.value = '';
+                  expiryInput.disabled = true;
               } else {
                   noExpiryCheckbox.checked = false;
                   expiryInput.disabled = false;
-                  expiryInput.style.backgroundColor = '';
-                  const expiryDate = new Date(expiryText.split('Expires: ')[1]);
-                  const formattedDate = expiryDate.toISOString().split('T')[0];
-                  expiryInput.value = formattedDate;
+                  const expiryDate = expiryText.split('Expires: ')[1];
+                  if (expiryDate) {
+                      const formattedDate = new Date(expiryDate).toISOString().split('T')[0];
+                      expiryInput.value = formattedDate;
+                  }
               }
           }
       } else {
-          expiryInput.style.display = 'none';
-          priceInput.style.display = 'block';
+          document.querySelector('.date-container').style.display = 'none';
+          document.querySelector('.price-container').style.display = 'flex';
           const priceText = item.querySelector('.item-price')?.textContent;
           if (priceText) {
               if (priceText.includes('Unknown')) {
@@ -227,9 +228,14 @@ function init() {
   });
 
   function displayItems() {
+    // Clear existing items first
+    currentList.innerHTML = '';
+    needList.innerHTML = '';
+    expiringList.innerHTML = '';
+    
     const items = getItemsFromStorage();
-    items.forEach(({ name, quantity, status, expiry, price }) => {
-      addItemToDOM(name, quantity, status, expiry, price);
+    items.forEach(({ name, quantity, status, expiry, price, isUnknownPrice }) => {
+        addItemToDOM(name, quantity, status, expiry, isUnknownPrice ? 0 : price);
     });
     checkUI();
   }
@@ -301,14 +307,14 @@ function init() {
     updateTotalAmount();
   }
 
-  function addItemToLocalStorage(name, quantity, status) {
+  function addItemToLocalStorage(name, quantity, status, expiry = '', price = 0) {
     const items = getItemsFromStorage();
     const capitalizedName = name.split(' ')
         .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
         .join(' ');
-    const expiry = status === 'current' ? expiryInput.value : '';
+    
+    // Don't redeclare expiry and price here - use the parameters
     const isUnknownPrice = status === 'need' && unknownPriceCheckbox.checked;
-    const price = isUnknownPrice ? 0 : parseFloat(priceInput.value) || 0;
     const noExpiry = noExpiryCheckbox.checked;
     
     items.push({ 
@@ -316,7 +322,7 @@ function init() {
         quantity, 
         status, 
         expiry: noExpiry ? '' : expiry, 
-        price,
+        price: isUnknownPrice ? 0 : price,
         isUnknownPrice: isUnknownPrice
     });
     
@@ -329,16 +335,15 @@ function init() {
     addItemToDOM(name, quantity, status, expiry, price);
   }
 
-  function updateLocalStorage(name, quantity, status) {
+  function updateLocalStorage(name, quantity, status, expiry = '', price = 0) {
     let items = getItemsFromStorage();
-    const expiry = status === 'current' ? expiryInput.value : '';
-    const price = status === 'need' ? parseFloat(priceInput.value) || 0 : 0;
+    // Don't redeclare expiry and price
     
     items = items.map((item) => {
-      if (item.name === editItem.querySelector('.item-name').textContent) {
-        return { name, quantity, status, expiry, price };
-      }
-      return item;
+        if (item.name === editItem.querySelector('.item-name').textContent) {
+            return { name, quantity, status, expiry, price };
+        }
+        return item;
     });
     
     localStorage.setItem('items', JSON.stringify(items));
