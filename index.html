@@ -57,28 +57,29 @@
             <option value="need">Need to Buy</option>
           </select>
           <div class="date-container">
-            <label for="expiry-input">Expiration Date</label>
             <input
               type="date"
               class="form-input"
               id="expiry-input"
               name="expiry"
             />
+            <div class="no-expiry">
+              <input type="checkbox" id="no-expiry-checkbox" />
+              <label for="no-expiry-checkbox">Expiry N/A</label>
+            </div>
           </div>
           <div class="price-container">
-            <div class="price-input-group">
-              <input
-                type="number"
-                class="form-input"
-                id="price-input"
-                name="price"
-                placeholder="Price per item"
-                step="0.01"
-              />
-              <div class="unknown-price">
-                <input type="checkbox" id="unknown-price-checkbox" />
-                <label for="unknown-price-checkbox">Price Unknown</label>
-              </div>
+            <input
+              type="number"
+              class="form-input"
+              id="price-input"
+              name="price"
+              placeholder="Price per item"
+              step="0.01"
+            />
+            <div class="unknown-price">
+              <input type="checkbox" id="unknown-price-checkbox" />
+              <label for="unknown-price-checkbox">Price N/A</label>
             </div>
           </div>
         </div>
