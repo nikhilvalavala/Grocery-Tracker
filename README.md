@@ -78,4 +78,3 @@ A web-based application to help users manage their groceries by tracking current
 2. Open index.html in a web browser
 3. No additional installation or dependencies required
 
-## File Structure
