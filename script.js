@@ -13,6 +13,7 @@ function init() {
   const priceInput = document.getElementById('price-input');
   const expiringList = document.getElementById('expiring-list');
   const totalAmount = document.getElementById('total-amount');
+  const currencySelect = document.getElementById('currency-select');
 
   let isEditMode = false;
   let editItem = null;
@@ -213,6 +214,7 @@ function init() {
 
   function addItemToDOM(name, quantity, status, expiry = '', price = 0) {
     const listItem = document.createElement('li');
+    const currencySymbol = getCurrencySymbol(currencySelect.value);
     
     // Capitalize each word in the item name
     const capitalizedName = name.split(' ')
@@ -240,7 +242,7 @@ function init() {
         <span class="item-name">${capitalizedName}</span>
         <span class="item-quantity">${quantity} units</span>
         ${expiry ? `<span class="item-expiry ${isExpiring ? 'expiring' : ''}">Expires: ${formattedExpiry}</span>` : ''}
-        ${status === 'need' ? `<span class="item-price">$${price.toFixed(2)} × ${quantity} = $${(price * quantity).toFixed(2)}</span>` : ''}
+        ${status === 'need' ? `<span class="item-price">${currencySymbol}${price.toFixed(2)} × ${quantity} = ${currencySymbol}${(price * quantity).toFixed(2)}</span>` : ''}
       </div>
       <div class="item-actions">
         <button class="edit-item btn-link">
@@ -347,7 +349,8 @@ function init() {
     const total = items
       .filter(item => item.status === 'need')
       .reduce((sum, item) => sum + (parseFloat(item.price) * parseInt(item.quantity)), 0);
-    totalAmount.textContent = `Total Amount to Spend: $${total.toFixed(2)}`;
+    const currencySymbol = getCurrencySymbol(currencySelect.value);
+    totalAmount.textContent = `Total Amount to Spend: ${currencySymbol}${total.toFixed(2)}`;
   }
 
   // Check for expiring items periodically
@@ -417,4 +420,30 @@ function init() {
           editMode(e.target.closest('li'));
       }
   });
+
+  // Add currency change event listener
+  currencySelect.addEventListener('change', function() {
+      localStorage.setItem('selectedCurrency', this.value);
+      displayItems(); // Refresh all items with new currency
+  });
+
+  // Add this to the init function to load saved currency preference
+  const savedCurrency = localStorage.getItem('selectedCurrency');
+  if (savedCurrency) {
+      currencySelect.value = savedCurrency;
+  }
+
+  // Add this function to get currency symbol
+  function getCurrencySymbol(currency) {
+      const symbols = {
+          'USD': '$',
+          'EUR': '€',
+          'GBP': '£',
+          'INR': '₹',
+          'JPY': '¥',
+          'AUD': 'A$',
+          'CAD': 'C$'
+      };
+      return symbols[currency] || '$';
+  }
 }
