@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.2/css/all.min.css"
+      integrity="sha512-1sCRPdkRXhBV2PBLUdRb4tMg1w2YPf37qatUFeS7zlBy7jJI8Lf4VHwWfZZfpXtYSLy85pkm9GaYVYMfw5BC1A=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <title>Grocery Tracker</title>
+    <link rel="stylesheet" href="styles.css">
+    
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div>
+          <h1>Grocery Tracker</h1>
+        </div>
+      </header>
+      <form id="item-form">
+        <div class="form-control">
+          <input
+            type="text"
+            class="form-input"
+            id="item-input"
+            name="item"
+            placeholder="Enter Item Name"
+          />
+          <input
+            type="number"
+            class="form-input"
+            id="quantity-input"
+            name="quantity"
+            placeholder="Enter Quantity"
+            min="1"
+            step="1"
+          />
+          <select id="status-input" class="form-input">
+            <option value="current">Currently Available</option>
+            <option value="need">Need to Buy</option>
+          </select>
+          <input
+            type="date"
+            class="form-input"
+            id="expiry-input"
+            name="expiry"
+          />
+          <input
+            type="number"
+            class="form-input"
+            id="price-input"
+            name="price"
+            placeholder="Price per item"
+            step="0.01"
+          />
+        </div>
+        <div class="form-control">
+          <button type="submit" class="btn">
+            <i class="fa-solid fa-plus"></i> Add Item
+          </button>
+        </div>
+      </form>
+
+      <div class="filter">
+        <input
+          type="text"
+          class="form-input-filter"
+          id="filter"
+          placeholder="Filter Items"
+        />
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <h2>Currently Available Groceries</h2>
+          <button class="btn-clear-section" data-list="current" title="Clear Current Items">
+            <i class="fas fa-trash-alt"></i>
+          </button>
+        </div>
+        <ul id="current-list" class="items"></ul>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <h2>Expiring Soon</h2>
+          <button class="btn-clear-section" data-list="expiring" title="Clear Expiring Items">
+            <i class="fas fa-trash-alt"></i>
+          </button>
+        </div>
+        <ul id="expiring-list" class="items"></ul>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <h2>Need to Buy</h2>
+          <button class="btn-clear-section" data-list="need" title="Clear Shopping List">
+            <i class="fas fa-trash-alt"></i>
+          </button>
+        </div>
+        <ul id="need-list" class="items"></ul>
+        <div id="total-amount" style="text-align: right; margin-top: 10px; font-weight: bold;">
+          Total Amount to Spend: $0.00
+        </div>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
