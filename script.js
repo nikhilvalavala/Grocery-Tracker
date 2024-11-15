@@ -16,6 +16,8 @@ function init() {
   const currencySelect = document.getElementById('currency-select');
   const unknownPriceCheckbox = document.getElementById('unknown-price-checkbox');
   const noExpiryCheckbox = document.getElementById('no-expiry-checkbox');
+  const receiptForm = document.getElementById('receipt-form');
+  const receiptsList = document.getElementById('receipts-list');
 
   let isEditMode = false;
   let editItem = null;
@@ -565,4 +567,247 @@ function init() {
 
   // Update the checkbox label in the HTML
   document.querySelector('label[for="unknown-price-checkbox"]').textContent = 'Price Unknown';
+
+  // Add these functions inside init()
+  function handleReceiptUpload(e) {
+    e.preventDefault();
+    
+    const receiptName = document.getElementById('receipt-name').value;
+    const receiptDate = document.getElementById('receipt-date').value;
+    const receiptAmount = document.getElementById('receipt-amount').value;
+    const receiptFile = document.getElementById('receipt-file').files[0];
+    
+    if (!receiptName || !receiptDate || !receiptFile) {
+        alert('Please fill in the receipt description, date, and upload a file');
+        return;
+    }
+    
+    // Validate amount
+    const amount = receiptAmount ? parseFloat(receiptAmount) : 0;
+    if (isNaN(amount) || amount < 0) {
+        alert('Please enter a valid amount');
+        return;
+    }
+    
+    // Check file size (max 5MB)
+    if (receiptFile.size > 5 * 1024 * 1024) {
+        alert('File size must be less than 5MB');
+        return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        const receipt = {
+            id: Date.now(),
+            name: receiptName,
+            date: receiptDate,
+            amount: amount,
+            file: event.target.result,
+            type: receiptFile.type
+        };
+        
+        saveReceipt(receipt);
+        displayReceipts();
+        receiptForm.reset();
+    };
+    
+    reader.readAsDataURL(receiptFile);
+  }
+
+  function saveReceipt(receipt) {
+    const receipts = getReceipts();
+    receipts.push(receipt);
+    localStorage.setItem('receipts', JSON.stringify(receipts));
+  }
+
+  function getReceipts() {
+    return JSON.parse(localStorage.getItem('receipts')) || [];
+  }
+
+  function displayReceipts() {
+    receiptsList.innerHTML = '';
+    const receipts = getReceipts();
+    const currencySymbol = getCurrencySymbol(currencySelect.value);
+    
+    receipts.forEach(receipt => {
+        const div = document.createElement('div');
+        div.className = 'receipt-card';
+        
+        const isImage = receipt.type.startsWith('image/');
+        const previewContent = isImage 
+            ? `<img src="${receipt.file}" alt="Receipt preview">` 
+            : '<i class="fas fa-file-pdf fa-3x"></i>';
+        
+        const amount = receipt.amount ? parseFloat(receipt.amount) : 0;
+        
+        div.innerHTML = `
+            <div class="receipt-header">
+                <h3 class="receipt-title">${receipt.name}</h3>
+                <span class="receipt-date">${new Date(receipt.date).toLocaleDateString()}</span>
+            </div>
+            <div class="receipt-preview">
+                ${previewContent}
+            </div>
+            <div class="receipt-amount">
+                Total: ${currencySymbol}${amount.toFixed(2)}
+            </div>
+            <div class="receipt-actions">
+                <button class="view-receipt">
+                    <i class="fas fa-eye"></i> View
+                </button>
+                <button class="delete-receipt">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
+            </div>
+        `;
+        
+        // Add event listeners
+        div.querySelector('.view-receipt').addEventListener('click', () => {
+            const receiptData = receipt.file;
+            const newWindow = window.open('', '_blank');
+            newWindow.document.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>${receipt.name} - Receipt View</title>
+                    <style>
+                        body {
+                            margin: 0;
+                            padding: 20px;
+                            display: flex;
+                            justify-content: center;
+                            align-items: flex-start;
+                            min-height: 100vh;
+                            background: #f5f5f5;
+                            font-family: Arial, sans-serif;
+                        }
+                        .container {
+                            background: white;
+                            padding: 20px;
+                            border-radius: 8px;
+                            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                            max-width: 100%;
+                            box-sizing: border-box;
+                        }
+                        .header {
+                            margin-bottom: 20px;
+                            text-align: center;
+                        }
+                        .header h1 {
+                            margin: 0;
+                            color: #1a237e;
+                            font-size: 24px;
+                        }
+                        .header p {
+                            margin: 5px 0;
+                            color: #666;
+                        }
+                        img {
+                            max-width: 100%;
+                            height: auto;
+                            display: block;
+                            margin: 0 auto;
+                        }
+                        object {
+                            width: 100%;
+                            height: 90vh;
+                        }
+                        @media print {
+                            body {
+                                padding: 0;
+                                background: white;
+                            }
+                            .container {
+                                box-shadow: none;
+                                padding: 0;
+                            }
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h1>${receipt.name}</h1>
+                            <p>Date: ${new Date(receipt.date).toLocaleDateString()}</p>
+                        </div>
+                        ${isImage 
+                            ? `<img src="${receiptData}" alt="Receipt">`
+                            : `<object data="${receiptData}" type="application/pdf" width="100%" height="90vh">
+                                <p>Unable to display PDF. <a href="${receiptData}" target="_blank">Download Instead</a></p>
+                               </object>`
+                        }
+                    </div>
+                </body>
+                </html>
+            `);
+            newWindow.document.close();
+        });
+        
+        div.querySelector('.delete-receipt').addEventListener('click', () => {
+            if (confirm('Are you sure you want to delete this receipt?')) {
+                const receipts = getReceipts().filter(r => r.id !== receipt.id);
+                localStorage.setItem('receipts', JSON.stringify(receipts));
+                displayReceipts();
+            }
+        });
+        
+        receiptsList.appendChild(div);
+    });
+  }
+
+  // Update the receipt form event listener
+  receiptForm.addEventListener('submit', handleReceiptUpload);
+
+  // Initialize receipts display
+  displayReceipts();
+
+  // Add event listener for the clear receipts button
+  document.querySelector('[data-list="receipts"]').addEventListener('click', function() {
+      if (confirm('Are you sure you want to clear all receipts?')) {
+          localStorage.removeItem('receipts');
+          displayReceipts();
+      }
+  });
+
+  // Add these to your init() function after other const declarations
+  const showReceiptsBtn = document.getElementById('show-receipts-btn');
+  const receiptsSection = document.getElementById('receipts-list');
+
+  // Add this event listener after other event listeners
+  showReceiptsBtn.addEventListener('click', function() {
+      const isHidden = receiptsSection.style.display === 'none';
+      receiptsSection.style.display = isHidden ? 'grid' : 'none';
+      this.innerHTML = isHidden 
+          ? '<i class="fas fa-times"></i> Hide Receipts'
+          : '<i class="fas fa-receipt"></i> Show Receipts';
+  });
+
+  // Add this function to initialize the receipts section
+  function initializeReceiptsSection() {
+      // Hide receipts list by default
+      receiptsList.style.display = 'none';
+      
+      // Set initial button text
+      const showReceiptsBtn = document.getElementById('show-receipts-btn');
+      showReceiptsBtn.innerHTML = '<i class="fas fa-receipt"></i> Show Receipts';
+      
+      // Add click event listener
+      showReceiptsBtn.addEventListener('click', function() {
+          const isHidden = receiptsList.style.display === 'none';
+          receiptsList.style.display = isHidden ? 'grid' : 'none';
+          this.innerHTML = isHidden 
+              ? '<i class="fas fa-times"></i> Hide Receipts'
+              : '<i class="fas fa-receipt"></i> Show Receipts';
+      });
+  }
+
+  // Call this in your init function
+  function init() {
+      // ... existing init code ...
+
+      // Initialize receipts section
+      initializeReceiptsSection();
+      
+      // ... rest of init code ...
+  }
 }

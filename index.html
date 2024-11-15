@@ -131,6 +131,59 @@
           Total Amount to Spend: $0.00
         </div>
       </div>
+
+      <div class="section">
+        <div class="section-header">
+          <h2>Grocery Bills & Receipts</h2>
+          <div class="receipt-header-actions">
+            <button class="btn" id="show-receipts-btn">
+              <i class="fas fa-receipt"></i> Show Receipts
+            </button>
+            <button class="btn-clear-section" data-list="receipts" title="Clear All Receipts">
+              <i class="fas fa-trash-alt"></i>
+            </button>
+          </div>
+        </div>
+        
+        <div class="receipt-upload">
+          <form id="receipt-form">
+            <div class="receipt-form-inline">
+              <input
+                type="text"
+                class="form-input receipt-name-input"
+                id="receipt-name"
+                placeholder="Bill Receipt Description"
+              />
+              <input
+                type="date"
+                class="form-input receipt-date-input"
+                id="receipt-date"
+              />
+              <input
+                type="number"
+                class="form-input receipt-amount-input"
+                id="receipt-amount"
+                placeholder="Amount"
+                step="0.01"
+                min="0"
+              />
+              <input
+                type="file"
+                id="receipt-file"
+                accept=".pdf,.png,.jpg,.jpeg"
+                class="form-input file-input"
+              />
+              <button type="submit" class="btn upload-btn">
+                <i class="fa-solid fa-upload"></i>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div id="receipts-list" class="receipts" style="display: none;">
+          <!-- Receipts will be displayed here -->
+        </div>
+      </div>
     </div>
 
     <script src="script.js"></script>
