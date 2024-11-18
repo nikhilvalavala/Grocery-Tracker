@@ -341,44 +341,7 @@ function init() {
   }
 
   function updateBudgetStats() {
-    const currentBudget = parseFloat(localStorage.getItem('monthlyBudget')) || 0;
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
-    
-    const receipts = getReceipts();
-    const monthlySpent = receipts.reduce((total, receipt) => {
-      const receiptDate = new Date(receipt.date);
-      if (receiptDate.getMonth() === currentMonth && 
-          receiptDate.getFullYear() === currentYear) {
-        return total + (parseFloat(receipt.amount) || 0);
-      }
-      return total;
-    }, 0);
-
-    const currencySymbol = getCurrencySymbol(currencySelect.value);
-    
-    // Set all amounts to green initially
-    currentBudgetDisplay.style.color = '#28a745';
-    spentAmountDisplay.style.color = '#28a745';
-    remainingBudgetDisplay.style.color = '#28a745';
-    
-    // Update the displays
-    currentBudgetDisplay.textContent = `${currencySymbol}${currentBudget.toFixed(2)}`;
-    spentAmountDisplay.textContent = `${currencySymbol}${monthlySpent.toFixed(2)}`;
-    
-    const remaining = currentBudget - monthlySpent;
-    remainingBudgetDisplay.textContent = `${currencySymbol}${remaining.toFixed(2)}`;
-    
-    // Only change colors for warning/danger conditions
-    const spentPercentage = currentBudget > 0 ? (monthlySpent / currentBudget) * 100 : 0;
-    
-    if (spentPercentage >= 100) {
-      spentAmountDisplay.style.color = '#dc3545'; // red
-      remainingBudgetDisplay.style.color = '#dc3545'; // red
-    } else if (spentPercentage >= 80) {
-      spentAmountDisplay.style.color = '#ffc107'; // yellow
-      remainingBudgetDisplay.style.color = '#ffc107'; // yellow
-    }
+    updateBudgetDashboard();
   }
 
   function initializeReceiptsSection() {
@@ -857,14 +820,17 @@ function init() {
   receiptForm.addEventListener('submit', handleReceiptUpload);
 
   function showMoveDialog(item) {
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    document.body.appendChild(overlay);
+
     const dialog = document.createElement('div');
     dialog.className = 'move-item-dialog';
     
     const itemName = item.querySelector('.item-name').textContent;
-    const quantity = item.querySelector('.item-quantity').textContent.split(' ')[0];
     
     dialog.innerHTML = `
-      <h3>Move "${itemName}" to Currently Available</h3>
+      <h3>Move "${itemName}" to Groceries in Stock</h3>
       <div>
         <label for="move-expiry-input">Expiration Date:</label>
         <input type="date" id="move-expiry-input" class="form-input">
@@ -890,6 +856,7 @@ function init() {
     
     dialog.querySelector('.cancel').addEventListener('click', () => {
       dialog.remove();
+      overlay.remove();
     });
     
     dialog.querySelector('.confirm').addEventListener('click', () => {
@@ -902,6 +869,7 @@ function init() {
       
       moveItemToCurrent(item, expiry);
       dialog.remove();
+      overlay.remove();
     });
   }
 
@@ -909,20 +877,33 @@ function init() {
     const name = item.querySelector('.item-name').textContent;
     const quantity = parseInt(item.querySelector('.item-quantity').textContent);
     
+    // Remove item from shopping list
     item.remove();
+    
+    // Get all items from storage
     let items = getItemsFromStorage();
+    
+    // Remove the item from its current position
     items = items.filter(item => item.name !== name);
     
-    addItemToDOM(name, quantity, 'current', expiry);
-    items.push({
+    // Add the item with new status and expiry
+    const newItem = {
       name,
       quantity,
       status: 'current',
-      expiry,
-      price: 0
-    });
+      expiry: expiry || '',
+      price: 0,
+      isUnknownPrice: false
+    };
     
+    // Add to storage
+    items.push(newItem);
     localStorage.setItem('items', JSON.stringify(items));
+    
+    // Add to DOM
+    addItemToDOM(name, quantity, 'current', expiry);
+    
+    // Update UI
     updateTotalAmount();
     checkUI();
   }
@@ -1323,5 +1304,138 @@ function init() {
       displayReceipts();
       updateBudgetStats();
     }
+  }
+
+  function updateBudgetDashboard() {
+    const currentBudget = parseFloat(localStorage.getItem('monthlyBudget')) || 0;
+    const currentMonth = new Date().getMonth();
+    const currentYear = new Date().getFullYear();
+    const today = new Date();
+    const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const remainingDays = lastDayOfMonth - today.getDate();
+    
+    // Get receipts for current month
+    const receipts = getReceipts();
+    const monthlySpent = receipts.reduce((total, receipt) => {
+      const receiptDate = new Date(receipt.date);
+      if (receiptDate.getMonth() === currentMonth && 
+          receiptDate.getFullYear() === currentYear) {
+        return total + (parseFloat(receipt.amount) || 0);
+      }
+      return total;
+    }, 0);
+
+    const remaining = currentBudget - monthlySpent;
+    const spentPercentage = currentBudget > 0 ? (monthlySpent / currentBudget) * 100 : 0;
+    const currencySymbol = getCurrencySymbol(currencySelect.value);
+
+    // Update main stats
+    document.getElementById('current-budget').textContent = `${currencySymbol}${currentBudget.toFixed(2)}`;
+    document.getElementById('spent-amount').textContent = `${currencySymbol}${monthlySpent.toFixed(2)}`;
+    document.getElementById('remaining-budget').textContent = `${currencySymbol}${remaining.toFixed(2)}`;
+    
+    // Update status badges
+    updateBudgetStatus(spentPercentage);
+    document.getElementById('days-remaining').textContent = `${remainingDays} Days`;
+
+    // Update progress bar and percentage
+    const progressBar = document.getElementById('spending-progress');
+    progressBar.style.width = `${Math.min(spentPercentage, 100)}%`;
+    document.getElementById('spending-percentage').textContent = `${spentPercentage.toFixed(1)}% of budget used`;
+
+    // Calculate and update daily stats
+    const daysInMonth = lastDayOfMonth;
+    const daysPassed = today.getDate();
+    const dailyAverage = monthlySpent / daysPassed;
+    const recommendedDaily = remaining / remainingDays;
+
+    document.getElementById('daily-average').textContent = `${currencySymbol}${dailyAverage.toFixed(2)}`;
+    document.getElementById('recommended-daily').textContent = `${currencySymbol}${recommendedDaily.toFixed(2)}`;
+
+    // Calculate monthly comparison
+    const lastMonthSpent = calculateLastMonthSpending(receipts);
+    const monthlyComparison = lastMonthSpent > 0 
+      ? ((monthlySpent - lastMonthSpent) / lastMonthSpent * 100)
+      : 0;
+
+    const comparisonElement = document.getElementById('month-comparison');
+    comparisonElement.textContent = `${monthlyComparison > 0 ? '+' : ''}${monthlyComparison.toFixed(1)}%`;
+    comparisonElement.className = `stat-value ${monthlyComparison > 0 ? 'trend-up' : 'trend-down'}`;
+
+    // Calculate and update monthly average
+    const monthlyAverage = calculateMonthlyAverage(receipts);
+    document.getElementById('monthly-average').textContent = `${currencySymbol}${monthlyAverage.toFixed(2)}`;
+  }
+
+  function updateBudgetStatus(spentPercentage) {
+    const budgetStatus = document.getElementById('budget-status');
+    const spendingRate = document.getElementById('spending-rate');
+    
+    // Update budget status
+    if (spentPercentage >= 100) {
+      budgetStatus.textContent = 'Over Budget';
+      budgetStatus.style.background = '#ffebee';
+      budgetStatus.style.color = '#c62828';
+    } else if (spentPercentage >= 90) {
+      budgetStatus.textContent = 'Critical';
+      budgetStatus.style.background = '#fff3e0';
+      budgetStatus.style.color = '#e65100';
+    } else if (spentPercentage >= 75) {
+      budgetStatus.textContent = 'Warning';
+      budgetStatus.style.background = '#fff8e1';
+      budgetStatus.style.color = '#f57f17';
+    } else {
+      budgetStatus.textContent = 'On Track';
+      budgetStatus.style.background = '#e8f5e9';
+      budgetStatus.style.color = '#2e7d32';
+    }
+
+    // Update spending rate
+    const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+    const daysPassed = new Date().getDate();
+    const expectedPercentage = (daysPassed / daysInMonth) * 100;
+
+    if (spentPercentage > expectedPercentage + 20) {
+      spendingRate.textContent = 'High';
+      spendingRate.style.background = '#ffebee';
+      spendingRate.style.color = '#c62828';
+    } else if (spentPercentage < expectedPercentage - 20) {
+      spendingRate.textContent = 'Low';
+      spendingRate.style.background = '#e8f5e9';
+      spendingRate.style.color = '#2e7d32';
+    } else {
+      spendingRate.textContent = 'Normal';
+      spendingRate.style.background = '#e3f2fd';
+      spendingRate.style.color = '#1565c0';
+    }
+  }
+
+  function calculateLastMonthSpending(receipts) {
+    const lastMonth = new Date();
+    lastMonth.setMonth(lastMonth.getMonth() - 1);
+    
+    return receipts.reduce((total, receipt) => {
+      const receiptDate = new Date(receipt.date);
+      if (receiptDate.getMonth() === lastMonth.getMonth() && 
+          receiptDate.getFullYear() === lastMonth.getFullYear()) {
+        return total + (parseFloat(receipt.amount) || 0);
+      }
+      return total;
+    }, 0);
+  }
+
+  function calculateMonthlyAverage(receipts) {
+    if (receipts.length === 0) return 0;
+    
+    const months = new Set();
+    let totalAmount = 0;
+    
+    receipts.forEach(receipt => {
+      const date = new Date(receipt.date);
+      months.add(`${date.getFullYear()}-${date.getMonth()}`);
+      totalAmount += parseFloat(receipt.amount) || 0;
+    });
+    
+    return totalAmount / Math.max(months.size, 1);
   }
 }
