@@ -12,14 +12,17 @@
       referrerpolicy="no-referrer"
     />
     <link rel="stylesheet" href="style.css" />
-    <title>Grocery Tracker</title>
+    <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@500;600;700&family=Poppins:wght@400;500;600;700&family=Red+Hat+Display:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <title>Smart Grocery Manager</title>
     
   </head>
   <body>
     <div class="container">
       <header>
-        <div>
-          <h1>Grocery Tracker</h1>
+        <div class="title-wrapper">
+          <h1>Smart Grocery Manager</h1>
         </div>
         <div class="currency-selector">
           <label for="currency-select">Currency:</label>
@@ -41,7 +44,7 @@
             class="form-input"
             id="item-input"
             name="item"
-            placeholder="Enter Item Name"
+            placeholder="Add a Grocery Item"
           />
           <input
             type="number"
@@ -101,7 +104,7 @@
 
       <div class="section">
         <div class="section-header">
-          <h2>Currently Available Groceries</h2>
+          <h2>Groceries in Stock</h2>
           <button class="btn-clear-section" data-list="current" title="Clear Current Items">
             <i class="fas fa-trash-alt"></i>
           </button>
@@ -111,7 +114,7 @@
 
       <div class="section">
         <div class="section-header">
-          <h2>Expiring Soon</h2>
+          <h2>Items Near Expiry</h2>
           <button class="btn-clear-section" data-list="expiring" title="Clear Expiring Items">
             <i class="fas fa-trash-alt"></i>
           </button>
@@ -121,7 +124,7 @@
 
       <div class="section">
         <div class="section-header">
-          <h2>Need to Buy</h2>
+          <h2>Shopping List</h2>
           <button class="btn-clear-section" data-list="need" title="Clear Shopping List">
             <i class="fas fa-trash-alt"></i>
           </button>
@@ -134,10 +137,48 @@
 
       <div class="section">
         <div class="section-header">
-          <h2>Grocery Bills & Receipts</h2>
+          <h2>Budget Overview</h2>
+        </div>
+        
+        <div class="budget-container">
+          <div class="budget-input-container">
+            <label for="monthly-budget">Define Your Monthly Budget:</label>
+            <div class="budget-input-wrapper">
+              <input 
+                type="number" 
+                id="monthly-budget" 
+                class="form-input budget-input" 
+                placeholder="Enter amount"
+                min="0"
+                step="0.01"
+              >
+              <button class="btn set-budget-btn">Set Budget</button>
+            </div>
+          </div>
+          
+          <div class="budget-stats">
+            <div class="stat-card">
+              <h3>Monthly Budget</h3>
+              <p id="current-budget" class="budget-amount">$0.00</p>
+            </div>
+            <div class="stat-card">
+              <h3>Expenditure So Far</h3>
+              <p id="spent-amount" class="budget-amount">$0.00</p>
+            </div>
+            <div class="stat-card">
+              <h3>Budget Left</h3>
+              <p id="remaining-budget" class="budget-amount">$0.00</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <h2>Upload Bills & Track Spending</h2>
           <div class="receipt-header-actions">
             <button class="btn" id="show-receipts-btn">
-              <i class="fas fa-receipt"></i> Show Receipts
+              <i class="fas fa-receipt"></i> View Receipts
             </button>
             <button class="btn-clear-section" data-list="receipts" title="Clear All Receipts">
               <i class="fas fa-trash-alt"></i>

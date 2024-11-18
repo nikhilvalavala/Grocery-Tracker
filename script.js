@@ -18,226 +18,416 @@ function init() {
   const noExpiryCheckbox = document.getElementById('no-expiry-checkbox');
   const receiptForm = document.getElementById('receipt-form');
   const receiptsList = document.getElementById('receipts-list');
+  const monthlyBudgetInput = document.getElementById('monthly-budget');
+  const setBudgetBtn = document.querySelector('.set-budget-btn');
+  const currentBudgetDisplay = document.getElementById('current-budget');
+  const spentAmountDisplay = document.getElementById('spent-amount');
+  const remainingBudgetDisplay = document.getElementById('remaining-budget');
 
   let isEditMode = false;
   let editItem = null;
 
-  // Initially set up form based on default status
-  function initializeForm() {
-      const currentStatus = statusInput.value;
-      if (currentStatus === 'current') {
-          document.querySelector('.date-container').style.display = 'block';
-          document.querySelector('.price-container').style.display = 'none';
-          priceInput.value = '';
-          unknownPriceCheckbox.checked = false;
-      } else {
-          document.querySelector('.date-container').style.display = 'none';
-          document.querySelector('.price-container').style.display = 'flex';
-          expiryInput.value = '';
-      }
+  currencySelect.addEventListener('change', function() {
+    localStorage.setItem('selectedCurrency', this.value);
+    
+    // Clear and reload all lists
+    currentList.innerHTML = '';
+    expiringList.innerHTML = '';
+    needList.innerHTML = '';
+    
+    // Re-display all items with new currency
+    displayItems();
+    
+    // Update total amount immediately
+    updateTotalAmount();
+    
+    // If there are no items, still update the total amount display with new currency
+    if (getItemsFromStorage().length === 0) {
+      const currencySymbol = getCurrencySymbol(this.value);
+      totalAmount.textContent = `Total Amount to Spend: ${currencySymbol}0.00`;
+    }
+    updateBudgetStats();
+  });
+
+  unknownPriceCheckbox.addEventListener('change', function() {
+    if (this.checked) {
+      priceInput.value = '';
+      priceInput.disabled = true;
+      priceInput.placeholder = 'Price Unknown';
+    } else {
+      priceInput.disabled = false;
+      priceInput.placeholder = 'Enter Price per Item';
+    }
+  });
+
+  noExpiryCheckbox.addEventListener('change', function() {
+    if (this.checked) {
+      expiryInput.value = '';
+      expiryInput.disabled = true;
+      expiryInput.style.backgroundColor = '#f5f5f5';
+    } else {
+      expiryInput.disabled = false;
+      expiryInput.style.backgroundColor = '';
+    }
+  });
+
+  const savedCurrency = localStorage.getItem('selectedCurrency') || 'USD';
+  currencySelect.value = savedCurrency;
+
+  const savedBudget = localStorage.getItem('monthlyBudget');
+  if (savedBudget) {
+    const budgetAmount = parseFloat(savedBudget);
+    monthlyBudgetInput.value = budgetAmount;
+    const currencySymbol = getCurrencySymbol(currencySelect.value);
+    currentBudgetDisplay.textContent = `${currencySymbol}${budgetAmount.toFixed(2)}`;
   }
 
-  // Call initializeForm right after variable declarations
-  initializeForm();
-
-  // Add status change event listener
-  statusInput.addEventListener('change', function() {
-      const isCurrentStatus = this.value === 'current';
-      document.querySelector('.date-container').style.display = isCurrentStatus ? 'block' : 'none';
-      document.querySelector('.price-container').style.display = isCurrentStatus ? 'none' : 'flex';
+  if (setBudgetBtn) {
+    setBudgetBtn.addEventListener('click', async function(e) {
+      e.preventDefault();
+      const budgetAmount = parseFloat(monthlyBudgetInput.value);
       
-      // Clear the irrelevant inputs
-      if (isCurrentStatus) {
-          priceInput.value = '';
-          unknownPriceCheckbox.checked = false;
-      } else {
-          expiryInput.value = '';
-          noExpiryCheckbox.checked = false;
+      if (isNaN(budgetAmount) || budgetAmount < 0) {
+        await showCustomDialog('Please enter a valid budget amount', 'alert');
+        return;
       }
-  });
+      
+      // Check if there's an existing budget
+      const currentBudget = parseFloat(localStorage.getItem('monthlyBudget')) || 0;
+      
+      // If it's not the first time, check if it's the same amount
+      if (currentBudget !== 0 && budgetAmount === currentBudget) {
+        await showCustomDialog('The budget amount is the same as the current budget. Please enter a different amount.', 'alert');
+        return;
+      }
+      
+      // Different message for first time budget setting
+      const message = currentBudget === 0 ? 
+        'Are you sure you about the Budget amount?' : 
+        'Are you sure you want to change the Budget amount?';
+      
+      // Use the custom dialog instead of creating a new one
+      const confirmed = await showCustomDialog(message);
+      if (confirmed) {
+        localStorage.setItem('monthlyBudget', budgetAmount.toString());
+        const currencySymbol = getCurrencySymbol(currencySelect.value);
+        currentBudgetDisplay.textContent = `${currencySymbol}${budgetAmount.toFixed(2)}`;
+        updateBudgetStats();
+      } else {
+        monthlyBudgetInput.value = currentBudget;
+      }
+    });
+  }
+
+  initializeForm();
 
   displayItems();
 
-  // Add click event listener to document to handle clicking outside
-  document.addEventListener('click', function(e) {
-      if (!itemForm.contains(e.target) && !e.target.closest('.edit-item') && isEditMode) {
-          cancelEdit();
-      }
-  });
+  initializeReceiptsSection();
 
-  // Add cancel edit function
-  function cancelEdit() {
-      isEditMode = false;
-      editItem.classList.remove('edit-mode-item');
-      editItem = null;
-      itemForm.reset();
-      itemForm.querySelector('button').innerHTML = '<i class="fa-solid fa-plus"></i> Add Item';
-      initializeForm(); // Reset form inputs visibility
-  }
+  displayReceipts();
 
-  // Update the form submit handler
-  itemForm.addEventListener('submit', function (e) {
-      e.preventDefault();
+  updateBudgetStats();
 
-      if (itemInput.value === '' || quantityInput.value === '') {
-          alert('Please enter item name and quantity.');
-          return;
-      }
+  itemForm.addEventListener('submit', async function(e) {
+    e.preventDefault();
 
-      const itemName = itemInput.value.trim();
-      const itemQuantity = parseInt(quantityInput.value);
-      const itemStatus = statusInput.value;
-      const noExpiry = noExpiryCheckbox.checked;
-      const itemExpiry = (itemStatus === 'current' && !noExpiry) ? expiryInput.value : '';
-      const isUnknownPrice = itemStatus === 'need' && unknownPriceCheckbox.checked;
-      const itemPrice = isUnknownPrice ? 0 : parseFloat(priceInput.value) || 0;
+    const itemName = itemInput.value.trim();
+    const itemQuantity = parseInt(quantityInput.value);
+    const itemStatus = statusInput.value;
+    const itemExpiry = noExpiryCheckbox.checked ? '' : expiryInput.value;
+    const itemPrice = unknownPriceCheckbox.checked ? 0 : parseFloat(priceInput.value) || 0;
 
-      // Validate expiry date for items that need it
-      if (itemStatus === 'current' && !noExpiry && !itemExpiry) {
-          alert('Please enter an expiration date or check "Expiry N/A".');
-          return;
-      }
+    // Only validate if the values are invalid
+    if (!itemName || itemName === '') {
+      await showCustomDialog('Please enter an item name', 'alert');
+      return;
+    }
 
-      // Validate price for need to buy items
-      if (itemStatus === 'need' && !isUnknownPrice && !itemPrice) {
-          alert('Please enter a valid price or check "Price Unknown".');
-          return;
-      }
+    if (!itemQuantity || isNaN(itemQuantity) || itemQuantity < 1) {
+      await showCustomDialog('Please enter a valid quantity', 'alert');
+      return;
+    }
 
-      // Check for duplicates based on status
-      if (!isEditMode && isDuplicateItem(itemName, itemStatus)) {
-          alert('This item already exists in Currently Available Groceries. Please update the existing item or add a different item.');
-          return;
-      }
+    if (itemStatus === 'current' && !noExpiryCheckbox.checked && !itemExpiry) {
+      await showCustomDialog('Please select an expiry date or check "Expiry N/A"', 'alert');
+      return;
+    }
 
+    if (itemStatus === 'need' && !unknownPriceCheckbox.checked && (!itemPrice || itemPrice <= 0)) {
+      await showCustomDialog('Please enter a valid price or check "Price N/A"', 'alert');
+      return;
+    }
+
+    // Check for duplicates only when adding new items
+    if (!isEditMode && isDuplicateItem(itemName, itemStatus)) {
+      await showCustomDialog('This item already exists in the current list!', 'alert');
+      return;
+    }
+
+    try {
       if (isEditMode) {
-          if (editItem) {
-              editItemInDOM(itemName, itemQuantity, itemStatus, itemExpiry, itemPrice);
-              updateLocalStorage(itemName, itemQuantity, itemStatus, itemExpiry, itemPrice);
-              editItem.classList.remove('edit-mode-item');
-          }
-          isEditMode = false;
-          editItem = null;
+        // Update the item
+        updateLocalStorage(itemName, itemQuantity, itemStatus, itemExpiry, itemPrice);
+        editItemInDOM(itemName, itemQuantity, itemStatus, itemExpiry, itemPrice);
+        
+        // Reset submit button text
+        const submitButton = itemForm.querySelector('button[type="submit"]');
+        submitButton.innerHTML = '<i class="fa-solid fa-plus"></i> Add Item';
       } else {
-          addItemToDOM(itemName, itemQuantity, itemStatus, itemExpiry, itemPrice);
-          addItemToLocalStorage(itemName, itemQuantity, itemStatus, itemExpiry, itemPrice);
+        // Add new item
+        addItemToDOM(itemName, itemQuantity, itemStatus, itemExpiry, itemPrice);
+        addItemToLocalStorage(itemName, itemQuantity, itemStatus, itemExpiry, itemPrice);
       }
 
-      // Reset form
+      // Reset form and its state
       itemForm.reset();
-      itemForm.querySelector('button').innerHTML = '<i class="fa-solid fa-plus"></i> Add Item';
+      unknownPriceCheckbox.checked = false;
+      noExpiryCheckbox.checked = false;
+      priceInput.disabled = false;
+      expiryInput.disabled = false;
+      
+      // Reset price input placeholder
+      priceInput.placeholder = 'Enter Price per Item';
+      
+      // Initialize form to show/hide appropriate fields
       initializeForm();
-      checkUI();
+    } catch (error) {
+      await showCustomDialog('An error occurred while saving the item', 'alert');
+    }
   });
 
-  // Update editMode function
+  currentList.addEventListener('click', function(e) {
+    handleItemClick(e);
+  });
+
+  needList.addEventListener('click', function(e) {
+    handleItemClick(e);
+  });
+
+  expiringList.addEventListener('click', function(e) {
+    handleItemClick(e);
+  });
+
+  function handleItemClick(e) {
+    const targetElement = e.target.closest('button');
+    if (!targetElement) return;
+
+    const listItem = targetElement.closest('li');
+    
+    if (targetElement.classList.contains('remove-item') || 
+        targetElement.querySelector('.fa-xmark')) {
+      removeItem(listItem);
+    } else if (targetElement.classList.contains('edit-item') || 
+               targetElement.querySelector('.fa-pen')) {
+      editMode(listItem);
+    } else if (targetElement.classList.contains('move-item') || 
+               targetElement.querySelector('.fa-check')) {
+      showMoveDialog(listItem);
+    }
+  }
+
   function editMode(item) {
-      // Remove edit-mode-item class from any previously edited item
-      document.querySelectorAll('.edit-mode-item').forEach(item => {
-          item.classList.remove('edit-mode-item');
-      });
-
-      isEditMode = true;
-      editItem = item;
-      editItem.classList.add('edit-mode-item');
-
-      itemInput.value = item.querySelector('.item-name').textContent;
-      quantityInput.value = parseInt(item.querySelector('.item-quantity').textContent.split(' ')[0]);
-      
-      const isCurrentItem = item.closest('.items').id === 'current-list' || item.closest('.items').id === 'expiring-list';
-      statusInput.value = isCurrentItem ? 'current' : 'need';
-      
-      if (isCurrentItem) {
-          document.querySelector('.date-container').style.display = 'block';
-          document.querySelector('.price-container').style.display = 'none';
-          
-          const expiryText = item.querySelector('.item-expiry')?.textContent;
-          if (expiryText) {
-              if (expiryText.includes('N/A')) {
-                  noExpiryCheckbox.checked = true;
-                  expiryInput.value = '';
-                  expiryInput.disabled = true;
-              } else {
-                  noExpiryCheckbox.checked = false;
-                  expiryInput.disabled = false;
-                  const expiryDate = expiryText.split('Expires: ')[1];
-                  if (expiryDate) {
-                      const formattedDate = new Date(expiryDate).toISOString().split('T')[0];
-                      expiryInput.value = formattedDate;
-                  }
-              }
-          }
-      } else {
-          document.querySelector('.date-container').style.display = 'none';
-          document.querySelector('.price-container').style.display = 'flex';
-          const priceText = item.querySelector('.item-price')?.textContent;
-          if (priceText) {
-              if (priceText.includes('Unknown')) {
-                  unknownPriceCheckbox.checked = true;
-                  priceInput.disabled = true;
-                  priceInput.value = '';
-              } else {
-                  unknownPriceCheckbox.checked = false;
-                  priceInput.disabled = false;
-                  const price = priceText.split('$')[1].split(' ')[0];
-                  priceInput.value = price;
-              }
-          }
-      }
-      
-      itemForm.querySelector('button').innerHTML = '<i class="fa-solid fa-pen"></i> Update Item';
-  }
-
-  // Update price input to prevent negative values
-  priceInput.addEventListener('input', function() {
-      if (this.value < 0) {
-          this.value = 0;
-      }
-  });
-
-  // Update the event listeners for all sections
-  function addEventListenersToSection(section) {
-      section.addEventListener('click', function(e) {
-          const target = e.target;
-          const listItem = target.closest('li');
-          
-          // Check if clicked element or its parent is the edit or remove button
-          if (target.closest('.remove-item')) {
-              removeItem(listItem);
-          } else if (target.closest('.edit-item')) {
-              editMode(listItem);
-          }
-      });
-  }
-
-  // Add event listeners to all sections
-  addEventListenersToSection(currentList);
-  addEventListenersToSection(needList);
-  addEventListenersToSection(expiringList);
-
-  filterInput.addEventListener('input', function (e) {
-    const filterText = e.target.value.toLowerCase();
-    const items = document.querySelectorAll('.items li');
-
-    items.forEach((item) => {
-      const name = item.querySelector('.item-name').textContent.toLowerCase();
-      if (name.includes(filterText)) {
-        item.style.display = 'block';
-      } else {
-        item.style.display = 'none';
-      }
+    if (!item) return;
+    
+    // Remove edit-mode-item class from any previously edited items
+    document.querySelectorAll('.edit-mode-item').forEach(item => {
+      item.classList.remove('edit-mode-item');
     });
-  });
+    
+    isEditMode = true;
+    editItem = item;
+    
+    const itemText = item.querySelector('.item-name').textContent;
+    const itemQuantityText = item.querySelector('.item-quantity').textContent;
+    const quantity = parseInt(itemQuantityText);
+    
+    // Determine status based on which list contains the item
+    let itemStatus;
+    if (item.closest('#need-list')) {
+      itemStatus = 'need';
+    } else {
+      itemStatus = 'current';
+    }
+    
+    let itemExpiry = '';
+    let itemPrice = 0;
+    
+    // Reset checkboxes and enable inputs first
+    noExpiryCheckbox.checked = false;
+    unknownPriceCheckbox.checked = false;
+    expiryInput.disabled = false;
+    priceInput.disabled = false;
+    
+    if (itemStatus === 'current') {
+      const expirySpan = item.querySelector('.item-expiry');
+      if (expirySpan) {
+        const expiryText = expirySpan.textContent;
+        if (expiryText.includes('N/A')) {
+          noExpiryCheckbox.checked = true;
+          expiryInput.disabled = true;
+          expiryInput.value = '';
+        } else {
+          const expiryMatch = expiryText.match(/(Expires: |Expired on: )(.*)/);
+          if (expiryMatch) {
+            const expiryDate = new Date(expiryMatch[2]);
+            // Format date for input without timezone adjustment
+            itemExpiry = expiryDate.toISOString().split('T')[0];
+            noExpiryCheckbox.checked = false;
+            expiryInput.disabled = false;
+          }
+        }
+      }
+    } else {
+      const priceSpan = item.querySelector('.item-price');
+      if (priceSpan) {
+        if (priceSpan.textContent.includes('Unknown')) {
+          unknownPriceCheckbox.checked = true;
+          priceInput.disabled = true;
+          priceInput.value = '';
+        } else {
+          const priceMatch = priceSpan.textContent.match(/[\d.]+/);
+          if (priceMatch) {
+            itemPrice = parseFloat(priceMatch[0]);
+            unknownPriceCheckbox.checked = false;
+            priceInput.disabled = false;
+          }
+        }
+      }
+    }
+    
+    // Update form inputs
+    itemInput.value = itemText;
+    quantityInput.value = quantity;
+    statusInput.value = itemStatus;
+    expiryInput.value = itemExpiry;
+    priceInput.value = itemPrice || '';
+    
+    // Update form display based on status
+    if (itemStatus === 'current') {
+      document.querySelector('.date-container').style.display = 'block';
+      document.querySelector('.price-container').style.display = 'none';
+    } else {
+      document.querySelector('.date-container').style.display = 'none';
+      document.querySelector('.price-container').style.display = 'flex';
+    }
+    
+    // Update submit button text
+    const submitButton = itemForm.querySelector('button[type="submit"]');
+    submitButton.innerHTML = '<i class="fa-solid fa-pen"></i> Update Item';
+    
+    // Add edit mode class to item
+    item.classList.add('edit-mode-item');
+    
+    // Scroll to form
+    itemForm.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function initializeForm() {
+    const currentStatus = statusInput.value;
+    if (currentStatus === 'current') {
+      document.querySelector('.date-container').style.display = 'block';
+      document.querySelector('.price-container').style.display = 'none';
+      priceInput.value = '';
+      priceInput.placeholder = 'Enter Price per Item';
+      unknownPriceCheckbox.checked = false;
+      priceInput.disabled = false;
+    } else {
+      document.querySelector('.date-container').style.display = 'none';
+      document.querySelector('.price-container').style.display = 'flex';
+      expiryInput.value = '';
+      priceInput.placeholder = 'Enter Price per Item';
+    }
+  }
+
+  function updateBudgetStats() {
+    const currentBudget = parseFloat(localStorage.getItem('monthlyBudget')) || 0;
+    const currentMonth = new Date().getMonth();
+    const currentYear = new Date().getFullYear();
+    
+    const receipts = getReceipts();
+    const monthlySpent = receipts.reduce((total, receipt) => {
+      const receiptDate = new Date(receipt.date);
+      if (receiptDate.getMonth() === currentMonth && 
+          receiptDate.getFullYear() === currentYear) {
+        return total + (parseFloat(receipt.amount) || 0);
+      }
+      return total;
+    }, 0);
+
+    const currencySymbol = getCurrencySymbol(currencySelect.value);
+    
+    // Set all amounts to green initially
+    currentBudgetDisplay.style.color = '#28a745';
+    spentAmountDisplay.style.color = '#28a745';
+    remainingBudgetDisplay.style.color = '#28a745';
+    
+    // Update the displays
+    currentBudgetDisplay.textContent = `${currencySymbol}${currentBudget.toFixed(2)}`;
+    spentAmountDisplay.textContent = `${currencySymbol}${monthlySpent.toFixed(2)}`;
+    
+    const remaining = currentBudget - monthlySpent;
+    remainingBudgetDisplay.textContent = `${currencySymbol}${remaining.toFixed(2)}`;
+    
+    // Only change colors for warning/danger conditions
+    const spentPercentage = currentBudget > 0 ? (monthlySpent / currentBudget) * 100 : 0;
+    
+    if (spentPercentage >= 100) {
+      spentAmountDisplay.style.color = '#dc3545'; // red
+      remainingBudgetDisplay.style.color = '#dc3545'; // red
+    } else if (spentPercentage >= 80) {
+      spentAmountDisplay.style.color = '#ffc107'; // yellow
+      remainingBudgetDisplay.style.color = '#ffc107'; // yellow
+    }
+  }
+
+  function initializeReceiptsSection() {
+    const receiptsList = document.getElementById('receipts-list');
+    const showReceiptsBtn = document.getElementById('show-receipts-btn');
+    
+    if (!receiptsList || !showReceiptsBtn) return;
+    
+    // Initially hide receipts
+    receiptsList.style.display = 'none';
+    
+    // Remove existing event listener and add new one
+    const newShowReceiptsBtn = showReceiptsBtn.cloneNode(true);
+    showReceiptsBtn.parentNode.replaceChild(newShowReceiptsBtn, showReceiptsBtn);
+    
+    newShowReceiptsBtn.addEventListener('click', function() {
+      const isHidden = receiptsList.style.display === 'none';
+      receiptsList.style.display = isHidden ? 'grid' : 'none';
+      this.innerHTML = isHidden 
+        ? '<i class="fas fa-times"></i> Hide Receipts'
+        : '<i class="fas fa-receipt"></i> Show Receipts';
+    });
+  }
+
+  function getCurrencySymbol(currency) {
+    const symbols = {
+      USD: '$',
+      EUR: '€',
+      GBP: '£',
+      INR: '₹',
+      JPY: '¥',
+      AUD: 'A$',
+      CAD: 'C$'
+    };
+    return symbols[currency] || currency;
+  }
+
+  function getReceipts() {
+    return JSON.parse(localStorage.getItem('receipts')) || [];
+  }
 
   function displayItems() {
-    // Clear existing items first
     currentList.innerHTML = '';
     needList.innerHTML = '';
     expiringList.innerHTML = '';
     
     const items = getItemsFromStorage();
     items.forEach(({ name, quantity, status, expiry, price, isUnknownPrice }) => {
-        addItemToDOM(name, quantity, status, expiry, isUnknownPrice ? 0 : price);
+      addItemToDOM(name, quantity, status, expiry, isUnknownPrice ? 0 : price);
     });
     checkUI();
   }
@@ -246,86 +436,106 @@ function init() {
     const listItem = document.createElement('li');
     const currencySymbol = getCurrencySymbol(currencySelect.value);
     
-    // Capitalize each word in the item name
     const capitalizedName = name.split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join(' ');
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
     
     let expiryDisplay = '';
     if (status === 'current') {
-        if (expiry) {
-            const expiryDate = new Date(expiry);
-            expiryDisplay = `<span class="item-expiry ${isExpiringSoon(expiry) ? 'expiring' : ''}">
-                Expires: ${expiryDate.toLocaleDateString('en-US', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                })}
-            </span>`;
-        } else {
-            expiryDisplay = '<span class="item-expiry">Expires: N/A</span>';
+      if (expiry) {
+        // Create date without timezone offset
+        const expiryDate = new Date(expiry + 'T00:00:00Z');
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const daysUntilExpiry = Math.floor((expiryDate - today) / (1000 * 60 * 60 * 24));
+        
+        let expiryStatus = '';
+        let expiryPrefix = 'Expires: ';
+        
+        if (daysUntilExpiry < 0) {
+          expiryStatus = 'expired';
+          expiryPrefix = 'Expired on: ';
+        } else if (daysUntilExpiry <= 3) {
+          expiryStatus = 'expiring';
         }
+        
+        expiryDisplay = `<span class="item-expiry ${expiryStatus}">
+          ${expiryPrefix}${new Date(expiry).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            timeZone: 'UTC'
+          })}
+        </span>`;
+      } else {
+        expiryDisplay = '<span class="item-expiry">Expires: N/A</span>';
+      }
     }
     
     const isExpiring = expiry && isExpiringSoon(expiry);
     
     if (isExpiring) {
-        listItem.classList.add('expiring-item');
+      listItem.classList.add('expiring-item');
     }
     
     listItem.innerHTML = `
-        <div class="item-details">
-            <span class="item-name">${capitalizedName}</span>
-            <span class="item-quantity">${quantity} units</span>
-            ${status === 'current' ? 
-                expiryDisplay 
-                : 
-                (price === 0 ? 
-                    '<span class="item-price">Price: Unknown</span>' 
-                    : 
-                    `<span class="item-price">${currencySymbol}${price.toFixed(2)} × ${quantity} = ${currencySymbol}${(price * quantity).toFixed(2)}</span>`
-                )
-            }
-        </div>
-        <div class="item-actions">
-            <button class="edit-item btn-link">
-                <i class="fa-solid fa-pen"></i>
-            </button>
-            <button class="remove-item btn-link text-red">
-                <i class="fa-solid fa-xmark"></i>
-            </button>
-        </div>
+      <div class="item-details">
+        <span class="item-name">${capitalizedName}</span>
+        <span class="item-quantity">${quantity} units</span>
+        ${status === 'current' ? 
+          expiryDisplay 
+          : 
+          (price === 0 ? 
+            '<span class="item-price">Price: Unknown</span>' 
+            : 
+            `<span class="item-price">${currencySymbol}${price.toFixed(2)} × ${quantity} = ${currencySymbol}${(price * quantity).toFixed(2)}</span>`
+          )
+        }
+      </div>
+      <div class="item-actions">
+        ${status === 'need' ? 
+          '<button class="move-item btn-link"><i class="fa-solid fa-check"></i></button>' 
+          : ''
+        }
+        <button class="edit-item btn-link">
+          <i class="fa-solid fa-pen"></i>
+        </button>
+        <button class="remove-item btn-link text-red">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
     `;
 
     if (status === 'current') {
-        if (isExpiring) {
-            expiringList.appendChild(listItem);
-        } else {
-            currentList.appendChild(listItem);
-        }
+      if (isExpiring) {
+        expiringList.appendChild(listItem);
+      } else {
+        currentList.appendChild(listItem);
+      }
     } else {
-        needList.appendChild(listItem);
+      needList.appendChild(listItem);
     }
     updateTotalAmount();
+    updateBudgetStats();
   }
 
   function addItemToLocalStorage(name, quantity, status, expiry = '', price = 0) {
     const items = getItemsFromStorage();
     const capitalizedName = name.split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join(' ');
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
     
-    // Don't redeclare expiry and price here - use the parameters
     const isUnknownPrice = status === 'need' && unknownPriceCheckbox.checked;
     const noExpiry = noExpiryCheckbox.checked;
     
     items.push({ 
-        name: capitalizedName, 
-        quantity, 
-        status, 
-        expiry: noExpiry ? '' : expiry, 
-        price: isUnknownPrice ? 0 : price,
-        isUnknownPrice: isUnknownPrice
+      name: capitalizedName, 
+      quantity, 
+      status, 
+      expiry: noExpiry ? '' : expiry, 
+      price: isUnknownPrice ? 0 : price,
+      isUnknownPrice: isUnknownPrice
     });
     
     localStorage.setItem('items', JSON.stringify(items));
@@ -333,23 +543,47 @@ function init() {
   }
 
   function editItemInDOM(name, quantity, status, expiry, price) {
+    if (!editItem) return;
+    
+    // Remove the old item from DOM
+    editItem.classList.remove('edit-mode-item');
     editItem.remove();
+    
+    // Add the updated item
     addItemToDOM(name, quantity, status, expiry, price);
+    
+    // Reset edit mode
+    isEditMode = false;
+    editItem = null;
+    
+    // Reset submit button text
+    const submitButton = itemForm.querySelector('button[type="submit"]');
+    submitButton.innerHTML = '<i class="fa-solid fa-plus"></i> Add Item';
   }
 
   function updateLocalStorage(name, quantity, status, expiry = '', price = 0) {
     let items = getItemsFromStorage();
-    // Don't redeclare expiry and price
+    const oldItemName = editItem.querySelector('.item-name').textContent;
     
-    items = items.map((item) => {
-        if (item.name === editItem.querySelector('.item-name').textContent) {
-            return { name, quantity, status, expiry, price };
-        }
-        return item;
-    });
+    // Create the updated item object
+    const updatedItem = {
+      name: name,
+      quantity: quantity,
+      status: status,
+      expiry: noExpiryCheckbox.checked ? '' : expiry,
+      price: status === 'need' && unknownPriceCheckbox.checked ? 0 : price,
+      isUnknownPrice: status === 'need' && unknownPriceCheckbox.checked
+    };
     
+    // Update the items array
+    items = items.map(item => 
+      item.name === oldItemName ? updatedItem : item
+    );
+    
+    // Save to localStorage
     localStorage.setItem('items', JSON.stringify(items));
     updateTotalAmount();
+    updateBudgetStats();
   }
 
   function removeItem(item) {
@@ -358,6 +592,7 @@ function init() {
       item.remove();
       removeItemFromStorage(itemName);
       checkUI();
+      updateBudgetStats();
     }
   }
 
@@ -375,50 +610,51 @@ function init() {
   function isDuplicateItem(name, status) {
     const items = getItemsFromStorage();
     if (status === 'need') {
-        // For "Need to Buy" items, don't check for duplicates
-        return false;
+      return false;
     } else {
-        // For "Currently Available" items, check only among current and expiring items
-        return items.some(item => 
-            item.name.toLowerCase() === name.toLowerCase() && 
-            (item.status === 'current')
-        );
+      return items.some(item => 
+        item.name.toLowerCase() === name.toLowerCase() && 
+        (item.status === 'current')
+      );
     }
   }
 
   function checkUI() {
     const hasItems = currentList.children.length > 0 || 
-                    needList.children.length > 0 || 
-                    expiringList.children.length > 0;
+      needList.children.length > 0 || 
+      expiringList.children.length > 0;
     filterInput.style.display = hasItems ? 'block' : 'none';
   }
 
   function isExpiringSoon(expiryDate) {
     if (!expiryDate) return false;
+    
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // Reset time part for accurate day comparison
-    const expiry = new Date(expiryDate);
-    expiry.setHours(0, 0, 0, 0);
-    const daysUntilExpiry = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
-    return daysUntilExpiry <= 3 && daysUntilExpiry >= 0;
+    today.setHours(0, 0, 0, 0);
+    
+    // Create date without timezone offset
+    const expiry = new Date(expiryDate + 'T00:00:00Z');
+    
+    const daysUntilExpiry = Math.floor((expiry - today) / (1000 * 60 * 60 * 24));
+    
+    return daysUntilExpiry <= 3;
   }
 
   function updateTotalAmount() {
     const items = getItemsFromStorage();
     const total = items
-        .filter(item => item.status === 'need' && item.price > 0) // Only sum items with known prices
-        .reduce((sum, item) => sum + (parseFloat(item.price) * parseInt(item.quantity)), 0);
+      .filter(item => item.status === 'need' && item.price > 0)
+      .reduce((sum, item) => sum + (parseFloat(item.price) * parseInt(item.quantity)), 0);
     const currencySymbol = getCurrencySymbol(currencySelect.value);
     const unknownPriceItems = items.filter(item => item.status === 'need' && item.price === 0).length;
     
     let totalText = `Total Amount to Spend: ${currencySymbol}${total.toFixed(2)}`;
     if (unknownPriceItems > 0) {
-        totalText += ` (${unknownPriceItems} item${unknownPriceItems > 1 ? 's' : ''} with unknown price)`;
+      totalText += ` (${unknownPriceItems} item${unknownPriceItems > 1 ? 's' : ''} with unknown price)`;
     }
     totalAmount.textContent = totalText;
   }
 
-  // Check for expiring items periodically
   setInterval(() => {
     const items = getItemsFromStorage();
     items.forEach(item => {
@@ -426,9 +662,8 @@ function init() {
         alert(`${item.name} is expiring soon! Expiry date: ${item.expiry}`);
       }
     });
-  }, 86400000); // Check once per day
+  }, 86400000);
 
-  // Add a function to check and move items to expiring list
   function checkAndMoveExpiringItems() {
     const items = getItemsFromStorage();
     currentList.innerHTML = '';
@@ -441,134 +676,48 @@ function init() {
     });
   }
 
-  // Add periodic check for expiring items (every hour)
   setInterval(checkAndMoveExpiringItems, 3600000);
 
-  // Add event listeners for clear section buttons
   document.querySelectorAll('.btn-clear-section').forEach(button => {
-      button.addEventListener('click', function() {
-          const listType = this.dataset.list;
-          clearSection(listType);
-      });
+    button.addEventListener('click', function() {
+      const listType = this.dataset.list;
+      clearSection(listType);
+    });
   });
 
   function clearSection(listType) {
-      if (!confirm(`Are you sure you want to clear all items from this section?`)) return;
+    if (!confirm(`Are you sure you want to clear all ${listType === 'receipts' ? 'receipts' : 'items'} from this section?`)) return;
 
-      let items = getItemsFromStorage();
-      
-      switch(listType) {
-          case 'current':
-              currentList.innerHTML = '';
-              items = items.filter(item => item.status !== 'current' || isExpiringSoon(item.expiry));
-              break;
-          case 'expiring':
-              expiringList.innerHTML = '';
-              items = items.filter(item => !isExpiringSoon(item.expiry));
-              break;
-          case 'need':
-              needList.innerHTML = '';
-              items = items.filter(item => item.status !== 'need');
-              break;
-      }
-
-      localStorage.setItem('items', JSON.stringify(items));
-      updateTotalAmount();
-      checkUI();
-  }
-
-  // Add event listener for expiringList
-  expiringList.addEventListener('click', function (e) {
-      if (e.target.classList.contains('remove-item')) {
-          removeItem(e.target.closest('li'));
-      } else if (e.target.classList.contains('edit-item')) {
-          editMode(e.target.closest('li'));
-      }
-  });
-
-  // Update the currency change event listener
-  currencySelect.addEventListener('change', function() {
-      localStorage.setItem('selectedCurrency', this.value);
-      
-      // Clear and reload all lists
-      currentList.innerHTML = '';
-      expiringList.innerHTML = '';
-      needList.innerHTML = '';
-      
-      // Re-display all items with new currency
-      displayItems();
-      
-      // Update total amount immediately
-      updateTotalAmount();
-      
-      // If there are no items, still update the total amount display with new currency
-      if (getItemsFromStorage().length === 0) {
-          const currencySymbol = getCurrencySymbol(this.value);
-          totalAmount.textContent = `Total Amount to Spend: ${currencySymbol}0.00`;
-      }
-  });
-
-  // Update the init function to set initial currency display
-  function init() {
-      // ... existing variable declarations ...
-
-      // Set initial currency from localStorage or default to USD
-      const savedCurrency = localStorage.getItem('selectedCurrency');
-      if (savedCurrency) {
-          currencySelect.value = savedCurrency;
-      } else {
-          localStorage.setItem('selectedCurrency', 'USD');
-      }
-
-      // Update total amount display with correct currency symbol immediately
-      const currencySymbol = getCurrencySymbol(currencySelect.value);
-      totalAmount.textContent = `Total Amount to Spend: ${currencySymbol}0.00`;
-
-      // ... rest of init function ...
-  }
-
-  // Add this function to get currency symbol
-  function getCurrencySymbol(currency) {
-      const symbols = {
-          'USD': '$',
-          'EUR': '€',
-          'GBP': '£',
-          'INR': '₹',
-          'JPY': '¥',
-          'AUD': 'A$',
-          'CAD': 'C$'
-      };
-      return symbols[currency] || '$';
-  }
-
-  // Add checkbox event listener
-  unknownPriceCheckbox.addEventListener('change', function() {
-      if (this.checked) {
-          priceInput.value = '';
-          priceInput.disabled = true;
-          priceInput.placeholder = 'Price Unknown';
-      } else {
-          priceInput.disabled = false;
-          priceInput.placeholder = 'Enter Price per Item';
-      }
-  });
-
-  // Add event listener for no expiry checkbox
-  noExpiryCheckbox.addEventListener('change', function() {
-    if (this.checked) {
-      expiryInput.value = '';
-      expiryInput.disabled = true;
-      expiryInput.style.backgroundColor = '#f5f5f5';
-    } else {
-      expiryInput.disabled = false;
-      expiryInput.style.backgroundColor = '';
+    let items = getItemsFromStorage();
+    
+    switch(listType) {
+      case 'current':
+        currentList.innerHTML = '';
+        items = items.filter(item => item.status !== 'current' || isExpiringSoon(item.expiry));
+        break;
+      case 'expiring':
+        expiringList.innerHTML = '';
+        items = items.filter(item => !isExpiringSoon(item.expiry));
+        break;
+      case 'need':
+        needList.innerHTML = '';
+        items = items.filter(item => item.status !== 'need');
+        break;
+      case 'receipts':
+        // Clear receipts from localStorage
+        localStorage.removeItem('receipts');
+        // Update the display
+        displayReceipts();
+        // Update budget stats
+        updateBudgetStats();
+        return; // Return early as we don't need to update items storage
     }
-  });
 
-  // Update the checkbox label in the HTML
-  document.querySelector('label[for="unknown-price-checkbox"]').textContent = 'Price Unknown';
+    localStorage.setItem('items', JSON.stringify(items));
+    updateTotalAmount();
+    checkUI();
+  }
 
-  // Add these functions inside init()
   function handleReceiptUpload(e) {
     e.preventDefault();
     
@@ -577,38 +726,52 @@ function init() {
     const receiptAmount = document.getElementById('receipt-amount').value;
     const receiptFile = document.getElementById('receipt-file').files[0];
     
-    if (!receiptName || !receiptDate || !receiptFile) {
-        alert('Please fill in the receipt description, date, and upload a file');
-        return;
+    if (!receiptName || !receiptDate || !receiptAmount || !receiptFile) {
+      alert('Please fill in all receipt details and upload a file');
+      return;
     }
     
-    // Validate amount
-    const amount = receiptAmount ? parseFloat(receiptAmount) : 0;
+    const amount = parseFloat(receiptAmount);
     if (isNaN(amount) || amount < 0) {
-        alert('Please enter a valid amount');
-        return;
+      alert('Please enter a valid amount');
+      return;
     }
     
-    // Check file size (max 5MB)
     if (receiptFile.size > 5 * 1024 * 1024) {
-        alert('File size must be less than 5MB');
-        return;
+      alert('File size must be less than 5MB');
+      return;
     }
     
     const reader = new FileReader();
     reader.onload = function(event) {
-        const receipt = {
-            id: Date.now(),
-            name: receiptName,
-            date: receiptDate,
-            amount: amount,
-            file: event.target.result,
-            type: receiptFile.type
-        };
-        
-        saveReceipt(receipt);
-        displayReceipts();
-        receiptForm.reset();
+      const receipt = {
+        id: Date.now(),
+        name: receiptName,
+        date: receiptDate,
+        amount: amount,
+        file: event.target.result,
+        type: receiptFile.type
+      };
+      
+      // Save receipt to localStorage
+      const receipts = getReceipts();
+      receipts.push(receipt);
+      localStorage.setItem('receipts', JSON.stringify(receipts));
+      
+      // Show the receipts list if it's hidden
+      const receiptsList = document.getElementById('receipts-list');
+      if (receiptsList.style.display === 'none') {
+        receiptsList.style.display = 'grid';
+        const showReceiptsBtn = document.getElementById('show-receipts-btn');
+        if (showReceiptsBtn) {
+          showReceiptsBtn.innerHTML = '<i class="fas fa-times"></i> Hide Receipts';
+        }
+      }
+      
+      // Update UI
+      displayReceipts();
+      updateBudgetStats();
+      receiptForm.reset();
     };
     
     reader.readAsDataURL(receiptFile);
@@ -620,194 +783,545 @@ function init() {
     localStorage.setItem('receipts', JSON.stringify(receipts));
   }
 
-  function getReceipts() {
-    return JSON.parse(localStorage.getItem('receipts')) || [];
-  }
-
   function displayReceipts() {
+    const receiptsList = document.getElementById('receipts-list');
+    if (!receiptsList) return; // Guard clause if element doesn't exist
+    
+    // Clear existing receipts
     receiptsList.innerHTML = '';
+    
+    // Get receipts from storage
     const receipts = getReceipts();
     const currencySymbol = getCurrencySymbol(currencySelect.value);
     
+    // If no receipts, show a message
+    if (receipts.length === 0) {
+      receiptsList.innerHTML = '<p style="text-align: center; color: #666;">No receipts found</p>';
+      return;
+    }
+    
+    // Create and append receipt cards
     receipts.forEach(receipt => {
-        const div = document.createElement('div');
-        div.className = 'receipt-card';
-        
-        const isImage = receipt.type.startsWith('image/');
-        const previewContent = isImage 
-            ? `<img src="${receipt.file}" alt="Receipt preview">` 
-            : '<i class="fas fa-file-pdf fa-3x"></i>';
-        
-        const amount = receipt.amount ? parseFloat(receipt.amount) : 0;
-        
-        div.innerHTML = `
-            <div class="receipt-header">
-                <h3 class="receipt-title">${receipt.name}</h3>
-                <span class="receipt-date">${new Date(receipt.date).toLocaleDateString()}</span>
-            </div>
-            <div class="receipt-preview">
-                ${previewContent}
-            </div>
-            <div class="receipt-amount">
-                Total: ${currencySymbol}${amount.toFixed(2)}
-            </div>
-            <div class="receipt-actions">
-                <button class="view-receipt">
-                    <i class="fas fa-eye"></i> View
-                </button>
-                <button class="delete-receipt">
-                    <i class="fas fa-trash"></i> Delete
-                </button>
-            </div>
-        `;
-        
-        // Add event listeners
-        div.querySelector('.view-receipt').addEventListener('click', () => {
-            const receiptData = receipt.file;
-            const newWindow = window.open('', '_blank');
-            newWindow.document.write(`
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>${receipt.name} - Receipt View</title>
-                    <style>
-                        body {
-                            margin: 0;
-                            padding: 20px;
-                            display: flex;
-                            justify-content: center;
-                            align-items: flex-start;
-                            min-height: 100vh;
-                            background: #f5f5f5;
-                            font-family: Arial, sans-serif;
-                        }
-                        .container {
-                            background: white;
-                            padding: 20px;
-                            border-radius: 8px;
-                            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                            max-width: 100%;
-                            box-sizing: border-box;
-                        }
-                        .header {
-                            margin-bottom: 20px;
-                            text-align: center;
-                        }
-                        .header h1 {
-                            margin: 0;
-                            color: #1a237e;
-                            font-size: 24px;
-                        }
-                        .header p {
-                            margin: 5px 0;
-                            color: #666;
-                        }
-                        img {
-                            max-width: 100%;
-                            height: auto;
-                            display: block;
-                            margin: 0 auto;
-                        }
-                        object {
-                            width: 100%;
-                            height: 90vh;
-                        }
-                        @media print {
-                            body {
-                                padding: 0;
-                                background: white;
-                            }
-                            .container {
-                                box-shadow: none;
-                                padding: 0;
-                            }
-                        }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <div class="header">
-                            <h1>${receipt.name}</h1>
-                            <p>Date: ${new Date(receipt.date).toLocaleDateString()}</p>
-                        </div>
-                        ${isImage 
-                            ? `<img src="${receiptData}" alt="Receipt">`
-                            : `<object data="${receiptData}" type="application/pdf" width="100%" height="90vh">
-                                <p>Unable to display PDF. <a href="${receiptData}" target="_blank">Download Instead</a></p>
-                               </object>`
-                        }
-                    </div>
-                </body>
-                </html>
-            `);
-            newWindow.document.close();
-        });
-        
-        div.querySelector('.delete-receipt').addEventListener('click', () => {
-            if (confirm('Are you sure you want to delete this receipt?')) {
-                const receipts = getReceipts().filter(r => r.id !== receipt.id);
-                localStorage.setItem('receipts', JSON.stringify(receipts));
-                displayReceipts();
-            }
-        });
-        
-        receiptsList.appendChild(div);
+      const div = document.createElement('div');
+      div.className = 'receipt-card';
+      
+      // Create date without timezone offset
+      const receiptDate = new Date(receipt.date + 'T00:00:00Z');
+      
+      const isImage = receipt.type.startsWith('image/');
+      const previewContent = isImage 
+        ? `<img src="${receipt.file}" alt="Receipt preview">` 
+        : '<i class="fas fa-file-pdf fa-3x"></i>';
+      
+      div.innerHTML = `
+        <div class="receipt-header">
+          <h3 class="receipt-title">${receipt.name}</h3>
+          <span class="receipt-date">${receiptDate.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            timeZone: 'UTC'
+          })}</span>
+        </div>
+        <div class="receipt-preview">
+          ${previewContent}
+        </div>
+        <div class="receipt-amount">
+          Total: ${currencySymbol}${parseFloat(receipt.amount).toFixed(2)}
+        </div>
+        <div class="receipt-actions">
+          <button class="view-receipt">
+            <i class="fas fa-eye"></i> View
+          </button>
+          <button class="delete-receipt" data-id="${receipt.id}">
+            <i class="fas fa-trash"></i> Delete
+          </button>
+        </div>
+      `;
+      
+      // Add event listeners
+      div.querySelector('.view-receipt').addEventListener('click', () => {
+        viewReceipt(receipt);
+      });
+      
+      div.querySelector('.delete-receipt').addEventListener('click', () => {
+        if (confirm('Are you sure you want to delete this receipt?')) {
+          deleteReceipt(receipt.id);
+        }
+      });
+      
+      receiptsList.appendChild(div);
     });
   }
 
-  // Update the receipt form event listener
   receiptForm.addEventListener('submit', handleReceiptUpload);
 
-  // Initialize receipts display
-  displayReceipts();
-
-  // Add event listener for the clear receipts button
-  document.querySelector('[data-list="receipts"]').addEventListener('click', function() {
-      if (confirm('Are you sure you want to clear all receipts?')) {
-          localStorage.removeItem('receipts');
-          displayReceipts();
+  function showMoveDialog(item) {
+    const dialog = document.createElement('div');
+    dialog.className = 'move-item-dialog';
+    
+    const itemName = item.querySelector('.item-name').textContent;
+    const quantity = item.querySelector('.item-quantity').textContent.split(' ')[0];
+    
+    dialog.innerHTML = `
+      <h3>Move "${itemName}" to Currently Available</h3>
+      <div>
+        <label for="move-expiry-input">Expiration Date:</label>
+        <input type="date" id="move-expiry-input" class="form-input">
+        <div class="no-expiry">
+          <input type="checkbox" id="move-no-expiry-checkbox">
+          <label for="move-no-expiry-checkbox">No Expiry Date</label>
+        </div>
+      </div>
+      <div class="dialog-buttons">
+        <button class="cancel">Cancel</button>
+        <button class="confirm">Move Item</button>
+      </div>
+    `;
+    
+    document.body.appendChild(dialog);
+    
+    const expiryInput = dialog.querySelector('#move-expiry-input');
+    const noExpiryCheckbox = dialog.querySelector('#move-no-expiry-checkbox');
+    
+    noExpiryCheckbox.addEventListener('change', function() {
+      expiryInput.disabled = this.checked;
+    });
+    
+    dialog.querySelector('.cancel').addEventListener('click', () => {
+      dialog.remove();
+    });
+    
+    dialog.querySelector('.confirm').addEventListener('click', () => {
+      const expiry = noExpiryCheckbox.checked ? '' : expiryInput.value;
+      
+      if (!noExpiryCheckbox.checked && !expiry) {
+        alert('Please select an expiration date or check "No Expiry Date"');
+        return;
       }
-  });
-
-  // Add these to your init() function after other const declarations
-  const showReceiptsBtn = document.getElementById('show-receipts-btn');
-  const receiptsSection = document.getElementById('receipts-list');
-
-  // Add this event listener after other event listeners
-  showReceiptsBtn.addEventListener('click', function() {
-      const isHidden = receiptsSection.style.display === 'none';
-      receiptsSection.style.display = isHidden ? 'grid' : 'none';
-      this.innerHTML = isHidden 
-          ? '<i class="fas fa-times"></i> Hide Receipts'
-          : '<i class="fas fa-receipt"></i> Show Receipts';
-  });
-
-  // Add this function to initialize the receipts section
-  function initializeReceiptsSection() {
-      // Hide receipts list by default
-      receiptsList.style.display = 'none';
       
-      // Set initial button text
-      const showReceiptsBtn = document.getElementById('show-receipts-btn');
-      showReceiptsBtn.innerHTML = '<i class="fas fa-receipt"></i> Show Receipts';
-      
-      // Add click event listener
-      showReceiptsBtn.addEventListener('click', function() {
-          const isHidden = receiptsList.style.display === 'none';
-          receiptsList.style.display = isHidden ? 'grid' : 'none';
-          this.innerHTML = isHidden 
-              ? '<i class="fas fa-times"></i> Hide Receipts'
-              : '<i class="fas fa-receipt"></i> Show Receipts';
-      });
+      moveItemToCurrent(item, expiry);
+      dialog.remove();
+    });
   }
 
-  // Call this in your init function
-  function init() {
-      // ... existing init code ...
+  function moveItemToCurrent(item, expiry) {
+    const name = item.querySelector('.item-name').textContent;
+    const quantity = parseInt(item.querySelector('.item-quantity').textContent);
+    
+    item.remove();
+    let items = getItemsFromStorage();
+    items = items.filter(item => item.name !== name);
+    
+    addItemToDOM(name, quantity, 'current', expiry);
+    items.push({
+      name,
+      quantity,
+      status: 'current',
+      expiry,
+      price: 0
+    });
+    
+    localStorage.setItem('items', JSON.stringify(items));
+    updateTotalAmount();
+    checkUI();
+  }
 
-      // Initialize receipts section
-      initializeReceiptsSection();
+  function initializeBudget() {
+    const savedBudget = localStorage.getItem('monthlyBudget');
+    
+    if (savedBudget) {
+      const budgetAmount = parseFloat(savedBudget);
+      const currencySymbol = getCurrencySymbol(currencySelect.value);
       
-      // ... rest of init code ...
+      currentBudgetDisplay.textContent = `${currencySymbol}${budgetAmount.toFixed(2)}`;
+      
+      monthlyBudgetInput.value = budgetAmount;
+      
+      updateBudgetStats();
+    } else {
+      localStorage.setItem('monthlyBudget', '0');
+      const currencySymbol = getCurrencySymbol(currencySelect.value);
+      currentBudgetDisplay.textContent = `${currencySymbol}0.00`;
+      monthlyBudgetInput.value = '';
+    }
+  }
+
+  function formatCurrency(amount) {
+    const currencySymbol = getCurrencySymbol(currencySelect.value);
+    return `${currencySymbol}${amount.toFixed(2)}`;
+  }
+
+  function deleteReceipt(id) {
+    let receipts = getReceipts();
+    receipts = receipts.filter(receipt => receipt.id !== id);
+    localStorage.setItem('receipts', JSON.stringify(receipts));
+    displayReceipts();
+    updateBudgetStats();
+  }
+
+  function viewReceipt(receipt) {
+    const newWindow = window.open('', '_blank');
+    // Create date without timezone offset
+    const receiptDate = new Date(receipt.date + 'T00:00:00Z');
+    
+    newWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>${receipt.name} - Receipt View</title>
+        <style>
+          body {
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            background: #f5f5f5;
+            font-family: Arial, sans-serif;
+          }
+          .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 100%;
+            box-sizing: border-box;
+          }
+          .header {
+            margin-bottom: 20px;
+            text-align: center;
+          }
+          .header h1 {
+            margin: 0;
+            color: #1a237e;
+            font-size: 24px;
+          }
+          .header p {
+            margin: 5px 0;
+            color: #666;
+          }
+          img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+          }
+          object {
+            width: 100%;
+            height: 90vh;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>${receipt.name}</h1>
+            <p>Date: ${receiptDate.toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              timeZone: 'UTC'
+            })}</p>
+            <p>Amount: ${getCurrencySymbol(currencySelect.value)}${parseFloat(receipt.amount).toFixed(2)}</p>
+          </div>
+          ${receipt.type.startsWith('image/') 
+            ? `<img src="${receipt.file}" alt="Receipt">`
+            : `<object data="${receipt.file}" type="application/pdf" width="100%" height="90vh">
+                <p>Unable to display PDF. <a href="${receipt.file}" target="_blank">Download Instead</a></p>
+               </object>`
+          }
+        </div>
+      </body>
+      </html>
+    `);
+    newWindow.document.close();
+  }
+
+  statusInput.addEventListener('change', function() {
+    const currentStatus = this.value;
+    if (currentStatus === 'current') {
+      document.querySelector('.date-container').style.display = 'block';
+      document.querySelector('.price-container').style.display = 'none';
+      priceInput.value = '';
+      unknownPriceCheckbox.checked = false;
+    } else {
+      document.querySelector('.date-container').style.display = 'none';
+      document.querySelector('.price-container').style.display = 'flex';
+      expiryInput.value = '';
+      noExpiryCheckbox.checked = false;
+    }
+  });
+
+  document.addEventListener('click', function(e) {
+    // If we're not in edit mode, return early
+    if (!isEditMode) return;
+
+    // Check if click is outside the form and edited item
+    const isClickInsideForm = itemForm.contains(e.target);
+    const isClickInsideEditedItem = editItem && editItem.contains(e.target);
+    const isClickOnEditButton = e.target.closest('.edit-item') || e.target.closest('.fa-pen');
+
+    // If click is outside form and edited item, and not on an edit button, cancel edit mode
+    if (!isClickInsideForm && !isClickInsideEditedItem && !isClickOnEditButton) {
+      // Reset edit mode
+      isEditMode = false;
+      
+      // Remove edit-mode-item class from any edited items
+      document.querySelectorAll('.edit-mode-item').forEach(item => {
+        item.classList.remove('edit-mode-item');
+      });
+      
+      // Reset form
+      itemForm.reset();
+      
+      // Reset submit button text
+      const submitButton = itemForm.querySelector('button[type="submit"]');
+      submitButton.innerHTML = '<i class="fa-solid fa-plus"></i> Add Item';
+      
+      // Reset checkboxes and inputs
+      unknownPriceCheckbox.checked = false;
+      noExpiryCheckbox.checked = false;
+      priceInput.disabled = false;
+      expiryInput.disabled = false;
+      
+      // Initialize form to show/hide appropriate fields
+      initializeForm();
+      
+      editItem = null;
+    }
+  });
+
+  // Add this function at the start of init()
+  function showCustomDialog(message, type = 'confirm') {
+    return new Promise((resolve) => {
+      const dialog = document.createElement('div');
+      dialog.className = 'move-item-dialog';
+      
+      // Add overlay
+      const overlay = document.createElement('div');
+      overlay.className = 'dialog-overlay';
+      
+      dialog.innerHTML = `
+        <h3>${message}</h3>
+        <div class="dialog-buttons">
+          ${type === 'confirm' ? '<button class="btn-no">No</button>' : ''}
+          <button class="btn-yes">${type === 'alert' ? 'OK' : 'Yes'}</button>
+        </div>
+      `;
+      
+      // Add styles
+      dialog.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        z-index: 1001;
+        min-width: 300px;
+        max-width: 90%;
+      `;
+
+      overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1000;
+      `;
+      
+      document.body.appendChild(overlay);
+      document.body.appendChild(dialog);
+      
+      // Add event listeners for buttons
+      if (type === 'confirm') {
+        const noButton = dialog.querySelector('.btn-no');
+        noButton.addEventListener('click', () => {
+          dialog.remove();
+          overlay.remove();
+          resolve(false);
+        });
+        // Style No button
+        noButton.style.cssText = `
+          padding: 8px 20px;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 14px;
+          margin: 0 5px;
+          color: white;
+          background-color: #dc3545;
+          transition: background-color 0.2s;
+        `;
+        noButton.onmouseover = () => noButton.style.backgroundColor = '#c82333';
+        noButton.onmouseout = () => noButton.style.backgroundColor = '#dc3545';
+      }
+      
+      const yesButton = dialog.querySelector('.btn-yes');
+      yesButton.addEventListener('click', () => {
+        dialog.remove();
+        overlay.remove();
+        resolve(true);
+      });
+      
+      // Style Yes/OK button
+      yesButton.style.cssText = `
+        padding: 8px 20px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        margin: 0 5px;
+        color: white;
+        background-color: #28a745;
+        transition: background-color 0.2s;
+      `;
+      yesButton.onmouseover = () => yesButton.style.backgroundColor = '#218838';
+      yesButton.onmouseout = () => yesButton.style.backgroundColor = '#28a745';
+
+      // Style the message
+      dialog.querySelector('h3').style.cssText = `
+        margin: 0 0 20px 0;
+        color: #333;
+        font-size: 16px;
+        text-align: center;
+      `;
+
+      // Style the buttons container
+      dialog.querySelector('.dialog-buttons').style.cssText = `
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        margin-top: 20px;
+      `;
+    });
+  }
+
+  // Update the removeItem function
+  async function removeItem(item) {
+    const confirmed = await showCustomDialog('Are you sure you want to remove this item?');
+    if (confirmed) {
+      const itemName = item.querySelector('.item-name').textContent;
+      item.remove();
+      removeItemFromStorage(itemName);
+      checkUI();
+      updateBudgetStats();
+    }
+  }
+
+  // Update the clearSection function
+  async function clearSection(listType) {
+    const confirmed = await showCustomDialog(
+      `Are you sure you want to clear all ${listType === 'receipts' ? 'receipts' : 'items'} from this section?`
+    );
+    
+    if (!confirmed) return;
+
+    let items = getItemsFromStorage();
+    
+    switch(listType) {
+      case 'current':
+        currentList.innerHTML = '';
+        items = items.filter(item => item.status !== 'current' || isExpiringSoon(item.expiry));
+        break;
+      case 'expiring':
+        expiringList.innerHTML = '';
+        items = items.filter(item => !isExpiringSoon(item.expiry));
+        break;
+      case 'need':
+        needList.innerHTML = '';
+        items = items.filter(item => item.status !== 'need');
+        break;
+      case 'receipts':
+        // Clear receipts from localStorage
+        localStorage.removeItem('receipts');
+        // Update the display
+        displayReceipts();
+        // Update budget stats
+        updateBudgetStats();
+        return; // Return early as we don't need to update items storage
+    }
+
+    localStorage.setItem('items', JSON.stringify(items));
+    updateTotalAmount();
+    checkUI();
+  }
+
+  // Update the handleReceiptUpload function's validation
+  async function handleReceiptUpload(e) {
+    e.preventDefault();
+    
+    const receiptName = document.getElementById('receipt-name').value;
+    const receiptDate = document.getElementById('receipt-date').value;
+    const receiptAmount = document.getElementById('receipt-amount').value;
+    const receiptFile = document.getElementById('receipt-file').files[0];
+    
+    if (!receiptName || !receiptDate || !receiptAmount || !receiptFile) {
+      await showCustomDialog('Please fill in all receipt details and upload a file', 'alert');
+      return;
+    }
+    
+    const amount = parseFloat(receiptAmount);
+    if (isNaN(amount) || amount < 0) {
+      await showCustomDialog('Please enter a valid amount', 'alert');
+      return;
+    }
+    
+    if (receiptFile.size > 5 * 1024 * 1024) {
+      await showCustomDialog('File size must be less than 5MB', 'alert');
+      return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = function(event) {
+      const receipt = {
+        id: Date.now(),
+        name: receiptName,
+        date: receiptDate,
+        amount: amount,
+        file: event.target.result,
+        type: receiptFile.type
+      };
+      
+      // Save receipt to localStorage
+      const receipts = getReceipts();
+      receipts.push(receipt);
+      localStorage.setItem('receipts', JSON.stringify(receipts));
+      
+      // Show the receipts list if it's hidden
+      const receiptsList = document.getElementById('receipts-list');
+      if (receiptsList.style.display === 'none') {
+        receiptsList.style.display = 'grid';
+        const showReceiptsBtn = document.getElementById('show-receipts-btn');
+        if (showReceiptsBtn) {
+          showReceiptsBtn.innerHTML = '<i class="fas fa-times"></i> Hide Receipts';
+        }
+      }
+      
+      // Update UI
+      displayReceipts();
+      updateBudgetStats();
+      receiptForm.reset();
+    };
+    
+    reader.readAsDataURL(receiptFile);
+  }
+
+  // Update the deleteReceipt function
+  async function deleteReceipt(id) {
+    const confirmed = await showCustomDialog('Are you sure you want to delete this receipt?');
+    if (confirmed) {
+      let receipts = getReceipts();
+      receipts = receipts.filter(receipt => receipt.id !== id);
+      localStorage.setItem('receipts', JSON.stringify(receipts));
+      displayReceipts();
+      updateBudgetStats();
+    }
   }
 }
