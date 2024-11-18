@@ -186,7 +186,7 @@ header h1 {
 .items li {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   padding: 12px 15px;
   border: 1px solid #e0e0e0;
   border-radius: 12px;
@@ -194,6 +194,61 @@ header h1 {
   background: #fff;
   width: 100%;
   box-sizing: border-box;
+  position: relative;
+}
+
+.item-details {
+  display: flex;
+  flex-direction: column;
+  width: calc(100% - 110px);
+  gap: 8px;
+}
+
+.item-name {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #1a237e;
+  margin-bottom: 5px;
+  padding-right: 5px;
+}
+
+.item-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.item-quantity,
+.item-expiry,
+.item-price {
+  font-size: 0.9rem;
+  padding: 6px 12px;
+  border-radius: 15px;
+  white-space: nowrap;
+}
+
+.item-actions {
+  display: flex;
+  gap: 5px;
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  padding: 0;
 }
 
 .dark-mode {
@@ -308,6 +363,14 @@ h2 {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 15px;
+  padding: 10px 0;
+  border-bottom: 2px solid #f0f2f5;
+}
+
+.receipt-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .btn-clear-section {
@@ -433,21 +496,20 @@ h2 {
 }
 
 .item-details {
-  display: grid !important;
-  grid-template-columns: minmax(150px, 2fr) 120px minmax(200px, 1fr);
-  align-items: center;
-  gap: 15px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   width: calc(100% - 100px);
   padding: 0 10px;
+  align-items: center;
 }
 
 .item-name {
   font-size: 1.1rem;
   font-weight: 600;
   color: #1a237e;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 1 1 100%;
+  word-break: break-word;
 }
 
 .item-quantity {
@@ -457,8 +519,6 @@ h2 {
   font-size: 0.9rem;
   color: #1a237e;
   white-space: nowrap;
-  justify-self: start;
-  width: fit-content;
 }
 
 .item-expiry,
@@ -718,8 +778,7 @@ h2 {
   }
 
   .item-details {
-    width: calc(100% - 40px);
-    padding-right: 35px;
+    width: calc(100% - 45px);
   }
 
   /* Ensure filter doesn't cause overflow */
@@ -1160,9 +1219,47 @@ h2 {
 
 .item-details {
     display: flex;
-    gap: 20px;
+    flex-wrap: wrap;
+    gap: 10px;
+    width: calc(100% - 100px);
+    padding: 0 10px;
     align-items: center;
-    padding: 0 15px;
+}
+
+.item-name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #1a237e;
+    flex: 1 1 100%;
+    word-break: break-word;
+}
+
+@media (max-width: 768px) {
+    .items li {
+        padding: 15px;
+        position: relative;
+    }
+
+    .item-details {
+        width: calc(100% - 50px);
+        gap: 8px;
+        padding-right: 45px;
+    }
+
+    .item-name {
+        font-size: 1rem;
+        margin-bottom: 8px;
+        padding-right: 35px;
+    }
+
+    .item-actions {
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        flex-direction: column;
+        gap: 5px;
+    }
 }
 
 /* Update the form control styles for better mobile layout */
@@ -1408,74 +1505,102 @@ h2 {
     }
 
     .item-details {
-        display: flex !important;
-        flex-direction: row !important;
-        align-items: center;
-        gap: 10px;
+        display: grid !important;
+        grid-template-columns: 1fr auto !important;
+        grid-template-rows: auto auto;
+        gap: 8px;
         width: calc(100% - 45px);
         padding-right: 40px;
-        flex-wrap: nowrap;
     }
 
     .item-name {
+        grid-column: 1 / -1;
         font-size: 0.95rem;
-        min-width: auto;
-        flex: 1;
-        margin-right: 8px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        width: 100%;
+        white-space: normal; /* Allow text to wrap */
+        overflow: visible;
+        text-overflow: clip;
+        margin-bottom: 4px;
     }
 
     .item-quantity {
         font-size: 0.85rem;
         padding: 4px 8px;
-        min-width: auto;
-        white-space: nowrap;
+        justify-self: start;
     }
 
     .item-expiry,
     .item-price {
         font-size: 0.85rem;
         padding: 4px 8px;
-        min-width: auto;
+        width: auto;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Fix receipt header actions layout */
+    .receipt-header-actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .section-header {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    /* Update section header for better mobile layout */
+    .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding: 10px 0;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .section-header h2 {
+        font-size: 1.3rem;
+        margin: 0;
+    }
+
+    /* Ensure View Receipts button doesn't overlap */
+    #show-receipts-btn {
+        font-size: 0.9rem;
+        padding: 8px 12px;
         white-space: nowrap;
+        margin-right: 10px;
     }
 
-    .item-actions {
-        position: absolute;
-        top: 50%;
-        right: 8px;
-        transform: translateY(-50%);
-        flex-direction: column;
-        gap: 4px;
-        min-width: auto;
-        padding: 0;
-    }
-
-    .btn-link {
-        width: 28px;
-        height: 28px;
-        font-size: 0.8rem;
-        background: rgba(255, 255, 255, 0.9);
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    }
-
-    /* Ensure no wrapping */
-    .item-details > * {
-        flex-shrink: 0;
-    }
-
-    /* Allow item name to shrink */
-    .item-name {
-        flex-shrink: 1;
+    .btn-clear-section {
+        width: 35px;
+        height: 35px;
+        min-width: 35px;
     }
 }
 
 /* Additional optimization for very small screens */
 @media (max-width: 360px) {
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .receipt-header-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    #show-receipts-btn {
+        font-size: 0.85rem;
+        padding: 6px 10px;
+    }
+
     .item-details {
-        gap: 6px;
         padding-right: 35px;
     }
 
@@ -1488,12 +1613,6 @@ h2 {
     .item-price {
         font-size: 0.8rem;
         padding: 3px 6px;
-    }
-
-    .btn-link {
-        width: 24px;
-        height: 24px;
-        font-size: 0.75rem;
     }
 }
 
@@ -2154,4 +2273,234 @@ h2 {
     min-width: 80px;
     padding: 8px 16px;
   }
+}
+
+/* Update item layout and action buttons positioning */
+.items li {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 12px 15px;
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    background: #fff;
+    width: 100%;
+    box-sizing: border-box;
+    position: relative;
+}
+
+.item-details {
+    display: flex;
+    flex-direction: column;
+    width: calc(100% - 110px);
+    gap: 8px;
+}
+
+.item-name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #1a237e;
+    margin-bottom: 5px;
+    padding-right: 5px;
+}
+
+.item-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.item-actions {
+    display: flex;
+    gap: 5px;
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.btn-link {
+    background: none;
+    border: none;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    padding: 0;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .items li {
+        padding: 12px 15px;
+        min-height: 60px;
+    }
+
+    .item-details {
+        width: calc(100% - 100px);
+    }
+
+    .item-name {
+        font-size: 1rem;
+        padding-right: 0;
+    }
+
+    .item-info {
+        gap: 6px;
+    }
+
+    .item-quantity,
+    .item-expiry,
+    .item-price {
+        font-size: 0.85rem;
+        padding: 4px 8px;
+    }
+
+    .item-actions {
+        display: flex;
+        flex-direction: row;
+        gap: 8px;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+    }
+
+    .btn-link {
+        width: 28px;
+        height: 28px;
+        font-size: 0.9rem;
+    }
+}
+
+/* Extra small screen optimization */
+@media (max-width: 360px) {
+    .items li {
+        padding: 10px 12px;
+    }
+
+    .item-details {
+        width: calc(100% - 90px);
+    }
+
+    .item-name {
+        font-size: 0.95rem;
+    }
+
+    .btn-link {
+        width: 26px;
+        height: 26px;
+        font-size: 0.85rem;
+    }
+}
+
+/* Update receipt section header styles */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding: 10px 0;
+    border-bottom: 2px solid #f0f2f5;
+}
+
+.receipt-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+#show-receipts-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 8px 15px;
+    white-space: nowrap;
+    font-size: 0.95rem;
+}
+
+.btn-clear-section {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: none;
+    border: none;
+    color: #ef5350;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+/* Mobile styles for receipt section */
+@media (max-width: 768px) {
+    .section-header {
+        display: flex !important;
+        flex-direction: row !important; /* Force row direction */
+        justify-content: space-between !important;
+        align-items: center !important;
+        flex-wrap: nowrap !important; /* Prevent wrapping */
+        width: 100%;
+        margin-bottom: 15px;
+        padding: 10px 0;
+    }
+
+    .section h2 {
+        font-size: 1.3rem;
+        margin: 0;
+        padding-right: 10px;
+        flex: 1;
+    }
+
+    .btn-clear-section {
+        width: 35px;
+        height: 35px;
+        min-width: 35px;
+        margin-left: 10px;
+    }
+
+    /* Special styling only for receipt section */
+    .section:last-child .section-header {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+    }
+
+    .section:last-child .receipt-header-actions {
+        width: 100%;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 10px;
+    }
+
+    .section:last-child #show-receipts-btn {
+        flex: 1;
+        max-width: calc(100% - 50px);
+        margin-right: 10px;
+    }
+}
+
+/* Extra small screen optimization */
+@media (max-width: 360px) {
+    .section-header h2 {
+        font-size: 1.2rem;
+    }
+
+    #show-receipts-btn {
+        font-size: 0.85rem;
+        padding: 8px;
+    }
+
+    .btn-clear-section {
+        width: 35px;
+        height: 35px;
+        min-width: 35px;
+    }
 }

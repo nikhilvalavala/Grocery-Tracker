@@ -388,10 +388,15 @@ function init() {
     needList.innerHTML = '';
     expiringList.innerHTML = '';
     
-    const items = getItemsFromStorage();
-    items.forEach(({ name, quantity, status, expiry, price, isUnknownPrice }) => {
-      addItemToDOM(name, quantity, status, expiry, isUnknownPrice ? 0 : price);
+    // Get all items and sort them alphabetically by name
+    const items = getItemsFromStorage().sort((a, b) => {
+        return a.name.localeCompare(b.name);
     });
+    
+    items.forEach(({ name, quantity, status, expiry, price, isUnknownPrice }) => {
+        addItemToDOM(name, quantity, status, expiry, isUnknownPrice ? 0 : price);
+    });
+    
     checkUI();
   }
 
@@ -400,106 +405,105 @@ function init() {
     const currencySymbol = getCurrencySymbol(currencySelect.value);
     
     const capitalizedName = name.split(' ')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join(' ');
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
     
     let expiryDisplay = '';
     if (status === 'current') {
-      if (expiry) {
-        // Create date without timezone offset
-        const expiryDate = new Date(expiry + 'T00:00:00Z');
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        const daysUntilExpiry = Math.floor((expiryDate - today) / (1000 * 60 * 60 * 24));
-        
-        let expiryStatus = '';
-        let expiryPrefix = 'Expires: ';
-        
-        if (daysUntilExpiry < 0) {
-          expiryStatus = 'expired';
-          expiryPrefix = 'Expired on: ';
-        } else if (daysUntilExpiry <= 3) {
-          expiryStatus = 'expiring';
+        if (expiry) {
+            const expiryDate = new Date(expiry + 'T00:00:00Z');
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            const daysUntilExpiry = Math.floor((expiryDate - today) / (1000 * 60 * 60 * 24));
+            
+            let expiryStatus = '';
+            let expiryPrefix = 'Expires: ';
+            
+            if (daysUntilExpiry < 0) {
+                expiryStatus = 'expired';
+                expiryPrefix = 'Expired on: ';
+            } else if (daysUntilExpiry <= 3) {
+                expiryStatus = 'expiring';
+            }
+            
+            expiryDisplay = `<span class="item-expiry ${expiryStatus}">
+                ${expiryPrefix}${new Date(expiry).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    timeZone: 'UTC'
+                })}
+            </span>`;
+        } else {
+            expiryDisplay = '<span class="item-expiry">Expires: N/A</span>';
         }
-        
-        expiryDisplay = `<span class="item-expiry ${expiryStatus}">
-          ${expiryPrefix}${new Date(expiry).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            timeZone: 'UTC'
-          })}
-        </span>`;
-      } else {
-        expiryDisplay = '<span class="item-expiry">Expires: N/A</span>';
-      }
-    }
-    
-    const isExpiring = expiry && isExpiringSoon(expiry);
-    
-    if (isExpiring) {
-      listItem.classList.add('expiring-item');
     }
     
     listItem.innerHTML = `
-      <div class="item-details">
-        <span class="item-name">${capitalizedName}</span>
-        <span class="item-quantity">${quantity} units</span>
-        ${status === 'current' ? 
-          expiryDisplay 
-          : 
-          (price === 0 ? 
-            '<span class="item-price">Price: Unknown</span>' 
-            : 
-            `<span class="item-price">${currencySymbol}${price.toFixed(2)} × ${quantity} = ${currencySymbol}${(price * quantity).toFixed(2)}</span>`
-          )
-        }
-      </div>
-      <div class="item-actions">
-        ${status === 'need' ? 
-          '<button class="move-item btn-link"><i class="fa-solid fa-check"></i></button>' 
-          : ''
-        }
-        <button class="edit-item btn-link">
-          <i class="fa-solid fa-pen"></i>
-        </button>
-        <button class="remove-item btn-link text-red">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
-      </div>
+        <div class="item-details">
+            <div class="item-name">${capitalizedName}</div>
+            <div class="item-info">
+                <span class="item-quantity">${quantity} units</span>
+                ${status === 'current' ? 
+                    expiryDisplay 
+                    : 
+                    (price === 0 ? 
+                        '<span class="item-price">Price: Unknown</span>' 
+                        : 
+                        `<span class="item-price">${currencySymbol}${price.toFixed(2)} × ${quantity} = ${currencySymbol}${(price * quantity).toFixed(2)}</span>`
+                    )
+                }
+            </div>
+        </div>
+        <div class="item-actions">
+            ${status === 'need' ? 
+                '<button class="move-item btn-link"><i class="fa-solid fa-check"></i></button>' 
+                : ''
+            }
+            <button class="edit-item btn-link">
+                <i class="fa-solid fa-pen"></i>
+            </button>
+            <button class="remove-item btn-link text-red">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
     `;
 
     if (status === 'current') {
-      if (isExpiring) {
-        expiringList.appendChild(listItem);
-      } else {
-        currentList.appendChild(listItem);
-      }
+        if (isExpiringSoon(expiry)) {
+            expiringList.appendChild(listItem);
+        } else {
+            currentList.appendChild(listItem);
+        }
     } else {
-      needList.appendChild(listItem);
+        needList.appendChild(listItem);
     }
+    
     updateTotalAmount();
     updateBudgetStats();
   }
 
   function addItemToLocalStorage(name, quantity, status, expiry = '', price = 0) {
-    const items = getItemsFromStorage();
+    let items = getItemsFromStorage();
     const capitalizedName = name.split(' ')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join(' ');
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
     
     const isUnknownPrice = status === 'need' && unknownPriceCheckbox.checked;
     const noExpiry = noExpiryCheckbox.checked;
     
     items.push({ 
-      name: capitalizedName, 
-      quantity, 
-      status, 
-      expiry: noExpiry ? '' : expiry, 
-      price: isUnknownPrice ? 0 : price,
-      isUnknownPrice: isUnknownPrice
+        name: capitalizedName, 
+        quantity, 
+        status, 
+        expiry: noExpiry ? '' : expiry, 
+        price: isUnknownPrice ? 0 : price,
+        isUnknownPrice: isUnknownPrice
     });
+    
+    // Sort items alphabetically before saving
+    items.sort((a, b) => a.name.localeCompare(b.name));
     
     localStorage.setItem('items', JSON.stringify(items));
     updateTotalAmount();
@@ -748,73 +752,89 @@ function init() {
 
   function displayReceipts() {
     const receiptsList = document.getElementById('receipts-list');
-    if (!receiptsList) return; // Guard clause if element doesn't exist
+    if (!receiptsList) return;
     
     // Clear existing receipts
     receiptsList.innerHTML = '';
     
-    // Get receipts from storage
-    const receipts = getReceipts();
-    const currencySymbol = getCurrencySymbol(currencySelect.value);
-    
-    // If no receipts, show a message
-    if (receipts.length === 0) {
-      receiptsList.innerHTML = '<p style="text-align: center; color: #666;">No receipts found</p>';
-      return;
-    }
-    
-    // Create and append receipt cards
-    receipts.forEach(receipt => {
-      const div = document.createElement('div');
-      div.className = 'receipt-card';
-      
-      // Create date without timezone offset
-      const receiptDate = new Date(receipt.date + 'T00:00:00Z');
-      
-      const isImage = receipt.type.startsWith('image/');
-      const previewContent = isImage 
-        ? `<img src="${receipt.file}" alt="Receipt preview">` 
-        : '<i class="fas fa-file-pdf fa-3x"></i>';
-      
-      div.innerHTML = `
-        <div class="receipt-header">
-          <h3 class="receipt-title">${receipt.name}</h3>
-          <span class="receipt-date">${receiptDate.toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            timeZone: 'UTC'
-          })}</span>
-        </div>
-        <div class="receipt-preview">
-          ${previewContent}
-        </div>
-        <div class="receipt-amount">
-          Total: ${currencySymbol}${parseFloat(receipt.amount).toFixed(2)}
-        </div>
-        <div class="receipt-actions">
-          <button class="view-receipt">
-            <i class="fas fa-eye"></i> View
-          </button>
-          <button class="delete-receipt" data-id="${receipt.id}">
-            <i class="fas fa-trash"></i> Delete
-          </button>
-        </div>
-      `;
-      
-      // Add event listeners
-      div.querySelector('.view-receipt').addEventListener('click', () => {
-        viewReceipt(receipt);
-      });
-      
-      div.querySelector('.delete-receipt').addEventListener('click', () => {
-        if (confirm('Are you sure you want to delete this receipt?')) {
-          deleteReceipt(receipt.id);
+    try {
+        // Get receipts and sort by date (latest first)
+        let receipts = getReceipts();
+        receipts.sort((a, b) => {
+            const dateA = new Date(a.date + 'T00:00:00Z');
+            const dateB = new Date(b.date + 'T00:00:00Z');
+            return dateB - dateA;
+        });
+        
+        const currencySymbol = getCurrencySymbol(currencySelect.value);
+        
+        // If no receipts, show a message
+        if (receipts.length === 0) {
+            receiptsList.innerHTML = '<p style="text-align: center; color: #666;">No receipts found</p>';
+            return;
         }
-      });
-      
-      receiptsList.appendChild(div);
-    });
+        
+        // Create and append receipt cards
+        receipts.forEach(receipt => {
+            const div = document.createElement('div');
+            div.className = 'receipt-card';
+            
+            // Create date without timezone offset
+            const receiptDate = new Date(receipt.date + 'T00:00:00Z');
+            
+            const isImage = receipt.type.startsWith('image/');
+            const previewContent = isImage 
+                ? `<img src="${receipt.file}" alt="Receipt preview">` 
+                : '<i class="fas fa-file-pdf fa-3x"></i>';
+            
+            div.innerHTML = `
+                <div class="receipt-header">
+                    <h3 class="receipt-title">${receipt.name}</h3>
+                    <span class="receipt-date">${receiptDate.toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                        timeZone: 'UTC'
+                    })}</span>
+                </div>
+                <div class="receipt-preview">
+                    ${previewContent}
+                </div>
+                <div class="receipt-amount">
+                    Total: ${currencySymbol}${parseFloat(receipt.amount).toFixed(2)}
+                </div>
+                <div class="receipt-actions">
+                    <button class="view-receipt">
+                        <i class="fas fa-eye"></i> View
+                    </button>
+                    <button class="delete-receipt" data-id="${receipt.id}">
+                        <i class="fas fa-trash"></i> Delete
+                    </button>
+                </div>
+            `;
+            
+            // Add event listeners
+            div.querySelector('.view-receipt').addEventListener('click', () => {
+                viewReceipt(receipt);
+            });
+            
+            div.querySelector('.delete-receipt').addEventListener('click', async () => {
+                const confirmed = await showCustomDialog('Are you sure you want to delete this receipt?');
+                if (confirmed) {
+                    deleteReceipt(receipt.id);
+                }
+            });
+            
+            receiptsList.appendChild(div);
+        });
+        
+        // Show the receipts list
+        receiptsList.style.display = 'grid';
+        
+    } catch (error) {
+        console.error('Error displaying receipts:', error);
+        receiptsList.innerHTML = '<p style="text-align: center; color: #666;">Error loading receipts</p>';
+    }
   }
 
   receiptForm.addEventListener('submit', handleReceiptUpload);
@@ -1437,5 +1457,48 @@ function init() {
     });
     
     return totalAmount / Math.max(months.size, 1);
+  }
+
+  // Add filter functionality
+  filterInput.addEventListener('input', filterItems);
+
+  // Add this new function
+  function filterItems(e) {
+    const searchText = e.target.value.toLowerCase().trim();
+    const items = document.querySelectorAll('.items li');
+
+    if (!items.length) return; // Early return if no items
+
+    items.forEach(item => {
+        try {
+            const itemName = item.querySelector('.item-name')?.textContent.toLowerCase() || '';
+            const itemQuantity = item.querySelector('.item-quantity')?.textContent.toLowerCase() || '';
+            const itemExpiry = item.querySelector('.item-expiry')?.textContent.toLowerCase() || '';
+            const itemPrice = item.querySelector('.item-price')?.textContent.toLowerCase() || '';
+
+            const shouldShow = 
+                itemName.includes(searchText) || 
+                itemQuantity.includes(searchText) || 
+                itemExpiry.includes(searchText) || 
+                itemPrice.includes(searchText);
+
+            item.style.display = shouldShow ? 'flex' : 'none';
+        } catch (error) {
+            console.error('Error filtering item:', error);
+            item.style.display = 'flex'; // Show item if error occurs
+        }
+    });
+  }
+
+  // Update the checkUI function to handle filter visibility
+  function checkUI() {
+    const items = document.querySelectorAll('.items li');
+    const hasItems = items.length > 0;
+    
+    // Only show filter if there are items
+    const filterInput = document.querySelector('#filter');
+    if (filterInput) {
+        filterInput.style.display = hasItems ? 'block' : 'none';
+    }
   }
 }
