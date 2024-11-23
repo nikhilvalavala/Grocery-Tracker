@@ -23,6 +23,7 @@ function init() {
   const currentBudgetDisplay = document.getElementById('current-budget');
   const spentAmountDisplay = document.getElementById('spent-amount');
   const remainingBudgetDisplay = document.getElementById('remaining-budget');
+  const sortSelect = document.getElementById('sort-items');
 
   let isEditMode = false;
   let editItem = null;
@@ -44,7 +45,7 @@ function init() {
     // If there are no items, still update the total amount display with new currency
     if (getItemsFromStorage().length === 0) {
       const currencySymbol = getCurrencySymbol(this.value);
-      totalAmount.textContent = `Total Amount to Spend: ${currencySymbol}0.00`;
+      totalAmount.textContent = `Estimated Total: ${currencySymbol}0.00`;
     }
     updateBudgetStats();
   });
@@ -197,33 +198,28 @@ function init() {
     }
   });
 
-  currentList.addEventListener('click', function(e) {
-    handleItemClick(e);
-  });
-
-  needList.addEventListener('click', function(e) {
-    handleItemClick(e);
-  });
-
-  expiringList.addEventListener('click', function(e) {
-    handleItemClick(e);
-  });
+  // Add event listeners for all lists
+  document.getElementById('current-list-with-expiry').addEventListener('click', handleItemClick);
+  document.getElementById('current-list-no-expiry').addEventListener('click', handleItemClick);
+  needList.addEventListener('click', handleItemClick);
+  expiringList.addEventListener('click', handleItemClick);
 
   function handleItemClick(e) {
     const targetElement = e.target.closest('button');
     if (!targetElement) return;
 
     const listItem = targetElement.closest('li');
+    if (!listItem) return;
     
     if (targetElement.classList.contains('remove-item') || 
         targetElement.querySelector('.fa-xmark')) {
-      removeItem(listItem);
+        removeItem(listItem);
     } else if (targetElement.classList.contains('edit-item') || 
                targetElement.querySelector('.fa-pen')) {
-      editMode(listItem);
+        editMode(listItem);
     } else if (targetElement.classList.contains('move-item') || 
                targetElement.querySelector('.fa-check')) {
-      showMoveDialog(listItem);
+        showMoveDialog(listItem);
     }
   }
 
@@ -350,19 +346,20 @@ function init() {
     
     if (!receiptsList || !showReceiptsBtn) return;
     
-    // Initially hide receipts
+    // Initially hide receipts and set button text to "View Receipts"
     receiptsList.style.display = 'none';
+    showReceiptsBtn.innerHTML = '<i class="fas fa-receipt"></i> View Receipts';
     
     // Remove existing event listener and add new one
     const newShowReceiptsBtn = showReceiptsBtn.cloneNode(true);
     showReceiptsBtn.parentNode.replaceChild(newShowReceiptsBtn, showReceiptsBtn);
     
     newShowReceiptsBtn.addEventListener('click', function() {
-      const isHidden = receiptsList.style.display === 'none';
-      receiptsList.style.display = isHidden ? 'grid' : 'none';
-      this.innerHTML = isHidden 
-        ? '<i class="fas fa-times"></i> Hide Receipts'
-        : '<i class="fas fa-receipt"></i> Show Receipts';
+        const isHidden = receiptsList.style.display === 'none';
+        receiptsList.style.display = isHidden ? 'grid' : 'none';
+        this.innerHTML = isHidden 
+            ? '<i class="fas fa-times"></i> Hide Receipts'
+            : '<i class="fas fa-receipt"></i> View Receipts';
     });
   }
 
@@ -383,15 +380,33 @@ function init() {
     return JSON.parse(localStorage.getItem('receipts')) || [];
   }
 
-  function displayItems() {
-    currentList.innerHTML = '';
+  function displayItems(sortMethod = 'alphabetical') {
+    document.getElementById('current-list-with-expiry').innerHTML = '';
+    document.getElementById('current-list-no-expiry').innerHTML = '';
     needList.innerHTML = '';
     expiringList.innerHTML = '';
     
-    // Get all items and sort them alphabetically by name
-    const items = getItemsFromStorage().sort((a, b) => {
-        return a.name.localeCompare(b.name);
-    });
+    let items = getItemsFromStorage();
+    
+    // Sort items based on selected method
+    if (sortMethod === 'expiry') {
+        items.sort((a, b) => {
+            // If both items have expiry dates
+            if (a.expiry && b.expiry) {
+                const dateA = new Date(a.expiry + 'T00:00:00Z');
+                const dateB = new Date(b.expiry + 'T00:00:00Z');
+                return dateA - dateB;
+            }
+            // If only one item has expiry date
+            if (a.expiry) return -1;  // a comes first
+            if (b.expiry) return 1;   // b comes first
+            // If neither has expiry date, sort alphabetically
+            return a.name.localeCompare(b.name);
+        });
+    } else {
+        // Default alphabetical sorting
+        items.sort((a, b) => a.name.localeCompare(b.name));
+    }
     
     items.forEach(({ name, quantity, status, expiry, price, isUnknownPrice }) => {
         addItemToDOM(name, quantity, status, expiry, isUnknownPrice ? 0 : price);
@@ -422,7 +437,7 @@ function init() {
             
             if (daysUntilExpiry < 0) {
                 expiryStatus = 'expired';
-                expiryPrefix = 'Expired on: ';
+                expiryPrefix = 'Expired: ';
             } else if (daysUntilExpiry <= 3) {
                 expiryStatus = 'expiring';
             }
@@ -470,15 +485,23 @@ function init() {
         </div>
     `;
 
+    // Get the appropriate list
+    let targetList;
     if (status === 'current') {
         if (isExpiringSoon(expiry)) {
-            expiringList.appendChild(listItem);
+            targetList = expiringList;
         } else {
-            currentList.appendChild(listItem);
+            // Split between with-expiry and no-expiry lists
+            targetList = expiry 
+                ? document.getElementById('current-list-with-expiry')
+                : document.getElementById('current-list-no-expiry');
         }
     } else {
-        needList.appendChild(listItem);
+        targetList = needList;
     }
+
+    // Simply append the item (no sorting here)
+    targetList.appendChild(listItem);
     
     updateTotalAmount();
     updateBudgetStats();
@@ -502,10 +525,12 @@ function init() {
         isUnknownPrice: isUnknownPrice
     });
     
-    // Sort items alphabetically before saving
-    items.sort((a, b) => a.name.localeCompare(b.name));
-    
     localStorage.setItem('items', JSON.stringify(items));
+    
+    // Get current sort method and re-display items
+    const sortMethod = document.getElementById('sort-items').value;
+    displayItems(sortMethod);
+    
     updateTotalAmount();
   }
 
@@ -587,9 +612,11 @@ function init() {
   }
 
   function checkUI() {
-    const hasItems = currentList.children.length > 0 || 
-      needList.children.length > 0 || 
-      expiringList.children.length > 0;
+    const hasItems = 
+        document.getElementById('current-list-with-expiry').children.length > 0 || 
+        document.getElementById('current-list-no-expiry').children.length > 0 || 
+        needList.children.length > 0 || 
+        expiringList.children.length > 0;
     filterInput.style.display = hasItems ? 'block' : 'none';
   }
 
@@ -615,7 +642,7 @@ function init() {
     const currencySymbol = getCurrencySymbol(currencySelect.value);
     const unknownPriceItems = items.filter(item => item.status === 'need' && item.price === 0).length;
     
-    let totalText = `Total Amount to Spend: ${currencySymbol}${total.toFixed(2)}`;
+    let totalText = `Estimated Total: ${currencySymbol}${total.toFixed(2)}`;
     if (unknownPriceItems > 0) {
       totalText += ` (${unknownPriceItems} item${unknownPriceItems > 1 ? 's' : ''} with unknown price)`;
     }
@@ -658,26 +685,27 @@ function init() {
     let items = getItemsFromStorage();
     
     switch(listType) {
-      case 'current':
-        currentList.innerHTML = '';
-        items = items.filter(item => item.status !== 'current' || isExpiringSoon(item.expiry));
-        break;
-      case 'expiring':
-        expiringList.innerHTML = '';
-        items = items.filter(item => !isExpiringSoon(item.expiry));
-        break;
-      case 'need':
-        needList.innerHTML = '';
-        items = items.filter(item => item.status !== 'need');
-        break;
-      case 'receipts':
-        // Clear receipts from localStorage
-        localStorage.removeItem('receipts');
-        // Update the display
-        displayReceipts();
-        // Update budget stats
-        updateBudgetStats();
-        return; // Return early as we don't need to update items storage
+        case 'current':
+            document.getElementById('current-list-with-expiry').innerHTML = '';
+            document.getElementById('current-list-no-expiry').innerHTML = '';
+            items = items.filter(item => item.status !== 'current' || isExpiringSoon(item.expiry));
+            break;
+        case 'expiring':
+            expiringList.innerHTML = '';
+            items = items.filter(item => !isExpiringSoon(item.expiry));
+            break;
+        case 'need':
+            needList.innerHTML = '';
+            items = items.filter(item => item.status !== 'need');
+            break;
+        case 'receipts':
+            // Clear receipts from localStorage
+            localStorage.removeItem('receipts');
+            // Update the display
+            displayReceipts();
+            // Update budget stats
+            updateBudgetStats();
+            return; // Return early as we don't need to update items storage
     }
 
     localStorage.setItem('items', JSON.stringify(items));
@@ -828,9 +856,6 @@ function init() {
             receiptsList.appendChild(div);
         });
         
-        // Show the receipts list
-        receiptsList.style.display = 'grid';
-        
     } catch (error) {
         console.error('Error displaying receipts:', error);
         receiptsList.innerHTML = '<p style="text-align: center; color: #666;">Error loading receipts</p>';
@@ -851,10 +876,10 @@ function init() {
     
     dialog.innerHTML = `
       <h3>Move "${itemName}" to Groceries in Stock</h3>
-      <div>
+      <div style="margin-bottom: 30px;">
         <label for="move-expiry-input">Expiration Date:</label>
         <input type="date" id="move-expiry-input" class="form-input">
-        <div class="no-expiry">
+        <div class="no-expiry" style="position: static; margin-top: 8px;">
           <input type="checkbox" id="move-no-expiry-checkbox">
           <label for="move-no-expiry-checkbox">No Expiry Date</label>
         </div>
@@ -1228,7 +1253,8 @@ function init() {
     
     switch(listType) {
       case 'current':
-        currentList.innerHTML = '';
+        document.getElementById('current-list-with-expiry').innerHTML = '';
+        document.getElementById('current-list-no-expiry').innerHTML = '';
         items = items.filter(item => item.status !== 'current' || isExpiringSoon(item.expiry));
         break;
       case 'expiring':
@@ -1501,4 +1527,8 @@ function init() {
         filterInput.style.display = hasItems ? 'block' : 'none';
     }
   }
+
+  sortSelect.addEventListener('change', function() {
+    displayItems(this.value);
+  });
 }

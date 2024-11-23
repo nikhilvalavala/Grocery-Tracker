@@ -82,7 +82,7 @@
             />
             <div class="unknown-price">
               <input type="checkbox" id="unknown-price-checkbox" />
-              <label for="unknown-price-checkbox">Price N/A</label>
+              <label for="unknown-price-checkbox">Price Unknown</label>
             </div>
           </div>
         </div>
@@ -93,13 +93,17 @@
         </div>
       </form>
 
-      <div class="filter">
+      <div class="filter-sort-container">
         <input
           type="text"
           class="form-input-filter"
           id="filter"
           placeholder="Filter Items"
         />
+        <select id="sort-items" class="form-input sort-select">
+          <option value="alphabetical">Sort by Name</option>
+          <option value="expiry">Sort by Expiry Date</option>
+        </select>
       </div>
 
       <div class="section">
@@ -109,12 +113,23 @@
             <i class="fas fa-trash-alt"></i>
           </button>
         </div>
-        <ul id="current-list" class="items"></ul>
+        
+        <div class="subsections">
+          <div class="subsection">
+            <h3>Items with Expiry Date</h3>
+            <ul id="current-list-with-expiry" class="items"></ul>
+          </div>
+          
+          <div class="subsection">
+            <h3>Items without Expiry Date</h3>
+            <ul id="current-list-no-expiry" class="items"></ul>
+          </div>
+        </div>
       </div>
 
       <div class="section">
         <div class="section-header">
-          <h2>Items Near Expiry</h2>
+          <h2>Items Near Expiry/Expired</h2>
           <button class="btn-clear-section" data-list="expiring" title="Clear Expiring Items">
             <i class="fas fa-trash-alt"></i>
           </button>
@@ -131,7 +146,7 @@
         </div>
         <ul id="need-list" class="items"></ul>
         <div id="total-amount" style="text-align: right; margin-top: 10px; font-weight: bold;">
-          Total Amount to Spend: $0.00
+          Estimated Total: $0.00
         </div>
       </div>
 
@@ -230,7 +245,7 @@
 
       <div class="section">
         <div class="section-header">
-          <h2>Upload Bills & Track Spending</h2>
+          <h2>Upload Receipts</h2>
           <div class="receipt-header-actions">
             <button class="btn" id="show-receipts-btn">
               <i class="fas fa-receipt"></i> View Receipts
