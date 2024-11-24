@@ -19,6 +19,38 @@
     
   </head>
   <body>
+    <div id="loading-screen" class="loading-screen">
+      <div class="loading-content">
+        <div class="loading-logo">
+          <i class="fas fa-shopping-basket"></i>
+        </div>
+        <div class="loading-spinner-container">
+          <div class="loading-spinner"></div>
+          <div class="loading-spinner-inner"></div>
+        </div>
+        <h2>Smart Grocery Manager</h2>
+        <p class="loading-message">Loading your data...</p>
+        <div class="loading-progress">
+          <div class="loading-bar">
+            <div class="loading-bar-fill"></div>
+          </div>
+          <div class="loading-dots">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="auth-container" class="auth-container" style="display: none;">
+      <div class="auth-content">
+        <h2>Smart Grocery Manager</h2>
+        <p>Sign in to sync your grocery lists across devices</p>
+        <button id="google-signin" class="google-signin-btn">
+          <i class="fab fa-google"></i> Sign in with Google
+        </button>
+      </div>
+    </div>
     <div class="container">
       <header>
         <div class="title-wrapper">
@@ -37,6 +69,13 @@
           </select>
         </div>
       </header>
+      <div class="user-profile">
+        <img id="user-avatar" class="user-avatar" src="" alt="User avatar" style="display: none;">
+        <span id="user-name" class="user-name"></span>
+        <button id="sign-out" class="sign-out-btn" style="display: none;">
+          <i class="fas fa-sign-out-alt"></i> Sign Out
+        </button>
+      </div>
       <form id="item-form">
         <div class="form-control">
           <input
@@ -297,6 +336,35 @@
       </div>
     </div>
 
-    <script src="script.js"></script>
+    <script type="module">
+      // Import the functions you need from the SDKs you need
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+      import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+      import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+      const firebaseConfig = {
+        apiKey: "AIzaSyB5GLZFd4-QmG2tLPKmbd5RdojtC5EWb3U",
+        authDomain: "smart-grocery-manager-d43a3.firebaseapp.com",
+        projectId: "smart-grocery-manager-d43a3",
+        storageBucket: "smart-grocery-manager-d43a3.firebasestorage.app",
+        messagingSenderId: "805600845627",
+        appId: "1:805600845627:web:973d9e61305205235fe11e",
+        measurementId: "G-5LCJYV2X1Y"
+      };
+
+      // Initialize Firebase
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+      const provider = new GoogleAuthProvider();
+      const db = getFirestore(app);
+
+      // Make Firebase instances available globally
+      window.firebaseApp = app;
+      window.firebaseAuth = auth;
+      window.firebaseProvider = provider;
+      window.firebaseDb = db;
+    </script>
+
+    <script type="module" src="script.js"></script>
   </body>
 </html>

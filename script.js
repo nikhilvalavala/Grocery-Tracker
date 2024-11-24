@@ -1,3 +1,7 @@
+import { auth, provider, db } from './firebase-config.js';
+import { signInWithPopup, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
+import { doc, setDoc, getDoc, onSnapshot, collection, enableIndexedDbPersistence } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+
 document.addEventListener('DOMContentLoaded', init);
 
 function init() {
@@ -27,6 +31,115 @@ function init() {
 
   let isEditMode = false;
   let editItem = null;
+
+  let currentUser = null;
+  let unsubscribeSnapshot = null;
+
+  // Add connection state monitoring
+  let isOnline = window.navigator.onLine;
+  window.addEventListener('online', handleOnlineStatus);
+  window.addEventListener('offline', handleOnlineStatus);
+
+  function handleOnlineStatus() {
+    isOnline = window.navigator.onLine;
+    console.log('Connection status:', isOnline ? 'online' : 'offline');
+    if (isOnline && currentUser) {
+      syncDataWithServer();
+    }
+  }
+
+  // Add this function to handle data synchronization
+  async function syncDataWithServer() {
+    if (!currentUser || !isOnline) return;
+
+    try {
+      console.log('Starting sync with server...');
+      const userDoc = doc(db, 'users', currentUser.uid);
+      
+      // First, get the server data
+      const docSnap = await getDoc(userDoc);
+      console.log('Got server data:', docSnap.exists());
+      
+      let serverData = docSnap.exists() ? docSnap.data() : null;
+      
+      // Get local data
+      const localItems = getItemsFromStorage();
+      const localReceipts = getReceipts();
+      const localBudget = localStorage.getItem('monthlyBudget') || '0';
+      
+      console.log('Local data:', {
+        itemsCount: localItems.length,
+        receiptsCount: localReceipts.length,
+        budget: localBudget
+      });
+      
+      try {
+        if (serverData) {
+          // Merge data with server's data
+          const mergedItems = mergeData(localItems, serverData.items || []);
+          const mergedReceipts = mergeData(localReceipts, serverData.receipts || []);
+          
+          // Update local storage with merged data
+          localStorage.setItem('items', JSON.stringify(mergedItems));
+          localStorage.setItem('receipts', JSON.stringify(mergedReceipts));
+          localStorage.setItem('monthlyBudget', serverData.monthlyBudget || localBudget);
+          
+          // Update server with merged data
+          await setDoc(userDoc, {
+            items: mergedItems,
+            receipts: mergedReceipts,
+            monthlyBudget: serverData.monthlyBudget || localBudget,
+            lastUpdated: Date.now(),
+            userId: currentUser.uid // Add user ID for security rules
+          });
+          
+          console.log('Sync completed successfully');
+        } else {
+          // If no server data exists, push local data to server
+          await setDoc(userDoc, {
+            items: localItems,
+            receipts: localReceipts,
+            monthlyBudget: localBudget,
+            lastUpdated: Date.now(),
+            userId: currentUser.uid // Add user ID for security rules
+          });
+          
+          console.log('Initial data push completed');
+        }
+        
+        // Refresh the display
+        displayItems();
+        displayReceipts();
+        updateBudgetStats();
+        
+      } catch (writeError) {
+        console.error('Error writing to Firestore:', writeError);
+        throw writeError;
+      }
+      
+    } catch (error) {
+      console.error('Detailed sync error:', error);
+      
+      // More specific error messages
+      let errorMessage = 'Error syncing data. Will retry when connection improves.';
+      if (error.code === 'permission-denied') {
+        errorMessage = 'Permission denied. Please sign out and sign in again.';
+      } else if (error.code === 'unavailable') {
+        errorMessage = 'Server is currently unavailable. Working in offline mode.';
+      } else if (error.code === 'unauthenticated') {
+        errorMessage = 'Authentication expired. Please sign in again.';
+        // Force sign out if authentication expired
+        await handleSignOut();
+      }
+      
+      await showCustomDialog(errorMessage, 'alert');
+      
+      // Continue with local data
+      displayItems();
+      displayReceipts();
+      updateBudgetStats();
+    }
+  }
 
   currencySelect.addEventListener('change', function() {
     localStorage.setItem('selectedCurrency', this.value);
@@ -507,30 +620,42 @@ function init() {
     updateBudgetStats();
   }
 
-  function addItemToLocalStorage(name, quantity, status, expiry = '', price = 0) {
+  async function addItemToLocalStorage(name, quantity, status, expiry = '', price = 0) {
     let items = getItemsFromStorage();
     const capitalizedName = name.split(' ')
         .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
         .join(' ');
     
-    const isUnknownPrice = status === 'need' && unknownPriceCheckbox.checked;
-    const noExpiry = noExpiryCheckbox.checked;
+    const newItem = { 
+      id: Date.now().toString(),
+      name: capitalizedName, 
+      quantity, 
+      status, 
+      expiry: noExpiryCheckbox.checked ? '' : expiry, 
+      price: status === 'need' && unknownPriceCheckbox.checked ? 0 : price,
+      isUnknownPrice: status === 'need' && unknownPriceCheckbox.checked,
+      timestamp: Date.now()
+    };
     
-    items.push({ 
-        name: capitalizedName, 
-        quantity, 
-        status, 
-        expiry: noExpiry ? '' : expiry, 
-        price: isUnknownPrice ? 0 : price,
-        isUnknownPrice: isUnknownPrice
-    });
-    
+    items.push(newItem);
     localStorage.setItem('items', JSON.stringify(items));
     
-    // Get current sort method and re-display items
-    const sortMethod = document.getElementById('sort-items').value;
-    displayItems(sortMethod);
+    if (currentUser) {
+      try {
+        const userDoc = doc(db, 'users', currentUser.uid);
+        await setDoc(userDoc, {
+          items,
+          receipts: getReceipts(),
+          monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
+          lastUpdated: Date.now()
+        });
+      } catch (error) {
+        console.error('Error syncing data:', error);
+        await showCustomDialog('Error syncing data. Please try again.', 'alert');
+      }
+    }
     
+    displayItems();
     updateTotalAmount();
   }
 
@@ -553,27 +678,42 @@ function init() {
     submitButton.innerHTML = '<i class="fa-solid fa-plus"></i> Add Item';
   }
 
-  function updateLocalStorage(name, quantity, status, expiry = '', price = 0) {
+  async function updateLocalStorage(name, quantity, status, expiry = '', price = 0) {
     let items = getItemsFromStorage();
     const oldItemName = editItem.querySelector('.item-name').textContent;
     
-    // Create the updated item object
     const updatedItem = {
+      id: Date.now().toString(),
       name: name,
       quantity: quantity,
       status: status,
       expiry: noExpiryCheckbox.checked ? '' : expiry,
       price: status === 'need' && unknownPriceCheckbox.checked ? 0 : price,
-      isUnknownPrice: status === 'need' && unknownPriceCheckbox.checked
+      isUnknownPrice: status === 'need' && unknownPriceCheckbox.checked,
+      timestamp: Date.now()
     };
     
-    // Update the items array
     items = items.map(item => 
       item.name === oldItemName ? updatedItem : item
     );
     
-    // Save to localStorage
     localStorage.setItem('items', JSON.stringify(items));
+    
+    if (currentUser) {
+      try {
+        const userDoc = doc(db, 'users', currentUser.uid);
+        await setDoc(userDoc, {
+          items,
+          receipts: getReceipts(),
+          monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
+          lastUpdated: Date.now()
+        });
+      } catch (error) {
+        console.error('Error syncing update:', error);
+        await showCustomDialog('Error syncing update. Please try again.', 'alert');
+      }
+    }
+    
     updateTotalAmount();
     updateBudgetStats();
   }
@@ -588,10 +728,26 @@ function init() {
     }
   }
 
-  function removeItemFromStorage(name) {
+  async function removeItemFromStorage(name) {
     let items = getItemsFromStorage();
     items = items.filter((item) => item.name !== name);
     localStorage.setItem('items', JSON.stringify(items));
+    
+    if (currentUser) {
+      try {
+        const userDoc = doc(db, 'users', currentUser.uid);
+        await setDoc(userDoc, {
+          items,
+          receipts: getReceipts(),
+          monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
+          lastUpdated: Date.now()
+        });
+      } catch (error) {
+        console.error('Error syncing deletion:', error);
+        await showCustomDialog('Error syncing deletion. Please try again.', 'alert');
+      }
+    }
+    
     updateTotalAmount();
   }
 
@@ -636,17 +792,23 @@ function init() {
 
   function updateTotalAmount() {
     const items = getItemsFromStorage();
-    const total = items
-      .filter(item => item.status === 'need' && item.price > 0)
+    const needItems = items.filter(item => item.status === 'need');
+    const total = needItems
+      .filter(item => item.price > 0)
       .reduce((sum, item) => sum + (parseFloat(item.price) * parseInt(item.quantity)), 0);
-    const currencySymbol = getCurrencySymbol(currencySelect.value);
-    const unknownPriceItems = items.filter(item => item.status === 'need' && item.price === 0).length;
     
-    let totalText = `Estimated Total: ${currencySymbol}${total.toFixed(2)}`;
+    const currencySymbol = getCurrencySymbol(currencySelect.value);
+    const unknownPriceItems = needItems.filter(item => item.price === 0).length;
+    
+    // Main total amount
+    let totalText = `<div class="total-amount-main">Estimated Total: ${currencySymbol}${total.toFixed(2)}</div>`;
+    
+    // Add subtitle for unknown price items if any exist
     if (unknownPriceItems > 0) {
-      totalText += ` (${unknownPriceItems} item${unknownPriceItems > 1 ? 's' : ''} with unknown price)`;
+      totalText += `<div class="total-amount-subtitle">${unknownPriceItems} item${unknownPriceItems > 1 ? 's' : ''}, price unknown</div>`;
     }
-    totalAmount.textContent = totalText;
+    
+    totalAmount.innerHTML = totalText;
   }
 
   setInterval(() => {
@@ -904,53 +1066,81 @@ function init() {
       overlay.remove();
     });
     
-    dialog.querySelector('.confirm').addEventListener('click', () => {
+    dialog.querySelector('.confirm').addEventListener('click', async () => {
       const expiry = noExpiryCheckbox.checked ? '' : expiryInput.value;
       
       if (!noExpiryCheckbox.checked && !expiry) {
-        alert('Please select an expiration date or check "No Expiry Date"');
+        await showCustomDialog('Please select an expiration date or check "No Expiry Date"', 'alert');
         return;
       }
       
-      moveItemToCurrent(item, expiry);
+      await moveItemToCurrent(item, expiry);
       dialog.remove();
       overlay.remove();
     });
   }
 
-  function moveItemToCurrent(item, expiry) {
+  async function moveItemToCurrent(item, expiry) {
     const name = item.querySelector('.item-name').textContent;
     const quantity = parseInt(item.querySelector('.item-quantity').textContent);
-    
-    // Remove item from shopping list
-    item.remove();
     
     // Get all items from storage
     let items = getItemsFromStorage();
     
-    // Remove the item from its current position
-    items = items.filter(item => item.name !== name);
+    // Find the item to update
+    const itemIndex = items.findIndex(i => i.name === name);
+    if (itemIndex === -1) return;
     
-    // Add the item with new status and expiry
-    const newItem = {
-      name,
-      quantity,
+    // Create updated item
+    const updatedItem = {
+      ...items[itemIndex],
+      id: Date.now().toString(),
       status: 'current',
       expiry: expiry || '',
-      price: 0,
-      isUnknownPrice: false
+      timestamp: Date.now()
     };
     
-    // Add to storage
-    items.push(newItem);
+    // Remove old item and add updated one
+    items = items.filter(item => item.name !== name);
+    items.push(updatedItem);
+    
+    // Save to localStorage
     localStorage.setItem('items', JSON.stringify(items));
     
-    // Add to DOM
-    addItemToDOM(name, quantity, 'current', expiry);
-    
-    // Update UI
-    updateTotalAmount();
-    checkUI();
+    // Sync with Firestore if user is logged in
+    if (currentUser) {
+      try {
+        const userDoc = doc(db, 'users', currentUser.uid);
+        await setDoc(userDoc, {
+          items,
+          receipts: getReceipts(),
+          monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
+          lastUpdated: Date.now()
+        });
+        
+        // Remove the item from DOM - the Firestore listener will handle adding it to the correct list
+        item.remove();
+        
+        // Update UI without adding to DOM (Firestore listener will handle that)
+        updateTotalAmount();
+        checkUI();
+      } catch (error) {
+        console.error('Error syncing move:', error);
+        await showCustomDialog('Error syncing move. Please try again.', 'alert');
+        
+        // If there's an error, update the DOM directly
+        item.remove();
+        addItemToDOM(name, quantity, 'current', expiry);
+        updateTotalAmount();
+        checkUI();
+      }
+    } else {
+      // If offline, update the DOM directly
+      item.remove();
+      addItemToDOM(name, quantity, 'current', expiry);
+      updateTotalAmount();
+      checkUI();
+    }
   }
 
   function initializeBudget() {
@@ -1531,4 +1721,241 @@ function init() {
   sortSelect.addEventListener('change', function() {
     displayItems(this.value);
   });
+
+  // Add this function to handle Google Sign In
+  async function handleGoogleSignIn() {
+    try {
+      // Show loading screen
+      document.getElementById('loading-screen').style.display = 'flex';
+      document.getElementById('auth-container').style.display = 'none';
+      
+      console.log('Starting Google Sign In...');
+      const result = await Promise.race([
+        signInWithPopup(auth, provider),
+        new Promise((_, reject) => {
+          // Listen for popup closed event
+          const unsubscribe = auth.onAuthStateChanged((user) => {
+            if (!user) {
+              unsubscribe();
+              reject(new Error('Sign-in cancelled'));
+            }
+          });
+        })
+      ]);
+
+      console.log('Sign in successful:', result);
+      currentUser = result.user;
+      await initializeUserData();
+    } catch (error) {
+      console.error('Detailed error:', error);
+      let errorMessage = 'Error signing in with Google. Please try again.';
+      
+      // Immediately hide loading screen and show auth container for cancelled sign-in
+      if (error.message === 'Sign-in cancelled' || 
+          error.code === 'auth/popup-closed-by-user' || 
+          error.code === 'auth/cancelled-popup-request') {
+        document.getElementById('loading-screen').style.display = 'none';
+        document.getElementById('auth-container').style.display = 'flex';
+        return; // Don't show error message for cancelled sign-in
+      }
+      
+      switch (error.code) {
+        case 'auth/popup-blocked':
+          errorMessage = 'Please allow popups for this website to sign in with Google.';
+          break;
+        case 'auth/unauthorized-domain':
+          errorMessage = 'This domain is not authorized. Please make sure you\'re accessing from an authorized domain.';
+          break;
+        case 'auth/network-request-failed':
+          errorMessage = 'Network error. Please check your internet connection and try again.';
+          break;
+        default:
+          errorMessage = `Error signing in: ${error.message}`;
+      }
+      
+      console.log('Error message:', errorMessage);
+      await showCustomDialog(errorMessage, 'alert');
+      // Show auth container if there's an error
+      document.getElementById('auth-container').style.display = 'flex';
+    } finally {
+      // Hide loading screen
+      document.getElementById('loading-screen').style.display = 'none';
+    }
+  }
+
+  // Add this function to handle Sign Out
+  async function handleSignOut() {
+    try {
+      if (unsubscribeSnapshot) {
+        unsubscribeSnapshot();
+      }
+      await signOut(auth);
+      currentUser = null;
+      localStorage.clear();
+      displayItems();
+      document.getElementById('auth-container').style.display = 'flex';
+      document.getElementById('user-avatar').style.display = 'none';
+      document.getElementById('user-name').textContent = '';
+      document.getElementById('sign-out').style.display = 'none';
+    } catch (error) {
+      console.error('Error signing out:', error);
+      await showCustomDialog('Error signing out. Please try again.', 'alert');
+    }
+  }
+
+  // Add this function to initialize user data
+  async function initializeUserData() {
+    if (!currentUser) return;
+
+    try {
+      // Update UI
+      const userAvatar = document.getElementById('user-avatar');
+      const userName = document.getElementById('user-name');
+      const signOutBtn = document.getElementById('sign-out');
+
+      userAvatar.src = currentUser.photoURL;
+      userAvatar.style.display = 'block';
+      userName.textContent = currentUser.displayName;
+      signOutBtn.style.display = 'block';
+
+      // Get user's data from Firestore
+      const userDoc = doc(db, 'users', currentUser.uid);
+      const docSnap = await getDoc(userDoc);
+
+      if (docSnap.exists()) {
+        // If user data exists, use it
+        const data = docSnap.data();
+        localStorage.setItem('items', JSON.stringify(data.items || []));
+        localStorage.setItem('receipts', JSON.stringify(data.receipts || []));
+        localStorage.setItem('monthlyBudget', data.monthlyBudget || '0');
+      }
+
+      // Set up real-time listener
+      if (unsubscribeSnapshot) {
+        unsubscribeSnapshot();
+      }
+
+      unsubscribeSnapshot = onSnapshot(userDoc, (doc) => {
+        if (doc.exists()) {
+          const data = doc.data();
+          localStorage.setItem('items', JSON.stringify(data.items || []));
+          localStorage.setItem('receipts', JSON.stringify(data.receipts || []));
+          localStorage.setItem('monthlyBudget', data.monthlyBudget || '0');
+          displayItems();
+          displayReceipts();
+          updateBudgetStats();
+        }
+      });
+
+      displayItems();
+      displayReceipts();
+      updateBudgetStats();
+
+    } catch (error) {
+      console.error('Error initializing user data:', error);
+      await showCustomDialog('Error loading your data. Please try again.', 'alert');
+    }
+  }
+
+  // Add this function to enable offline support
+  async function enableOfflineSupport() {
+    try {
+      await enableIndexedDbPersistence(db);
+      console.log('Offline persistence enabled');
+    } catch (error) {
+      if (error.code === 'failed-precondition') {
+        // Multiple tabs open, persistence can only be enabled in one tab at a time
+        console.warn('Multiple tabs open, persistence disabled');
+      } else if (error.code === 'unimplemented') {
+        // The current browser doesn't support persistence
+        console.warn('Browser doesn\'t support persistence');
+      }
+      // Continue without offline persistence
+    }
+  }
+
+  // Update the mergeData function
+  function mergeData(localData, serverData) {
+    const merged = [...localData];
+    const seen = new Set(merged.map(item => item.name));
+    
+    serverData.forEach(serverItem => {
+      if (!seen.has(serverItem.name)) {
+        merged.push(serverItem);
+        seen.add(serverItem.name);
+      } else {
+        const localIndex = merged.findIndex(item => item.name === serverItem.name);
+        const localItem = merged[localIndex];
+        
+        // Use the most recent version
+        if (!localItem.timestamp || (serverItem.timestamp && serverItem.timestamp > localItem.timestamp)) {
+          merged[localIndex] = serverItem;
+        }
+      }
+    });
+    
+    return merged;
+  }
+
+  // Add auth state observer
+  onAuthStateChanged(auth, async (user) => {
+    try {
+      // Only show loading screen if user is signing in
+      if (user && !currentUser) {
+        document.getElementById('loading-screen').style.display = 'flex';
+        document.getElementById('auth-container').style.display = 'none';
+      }
+      
+      currentUser = user;
+      
+      if (user) {
+        // User is signed in
+        await initializeUserData();
+        document.getElementById('auth-container').style.display = 'none';
+      } else {
+        // User is not signed in
+        document.getElementById('auth-container').style.display = 'flex';
+      }
+    } catch (error) {
+      console.error('Auth state change error:', error);
+      // Show auth container if there's an error
+      document.getElementById('auth-container').style.display = 'flex';
+    } finally {
+      // Hide loading screen
+      document.getElementById('loading-screen').style.display = 'none';
+    }
+  });
+
+  // Add event listeners in init()
+  document.getElementById('google-signin').addEventListener('click', async () => {
+    if (checkFirebaseInitialization()) {
+      await handleGoogleSignIn();
+    }
+  });
+  document.getElementById('sign-out').addEventListener('click', handleSignOut);
+
+  // Add this function to check if Firebase is properly initialized
+  function checkFirebaseInitialization() {
+    if (!auth || !provider || !db) {
+      console.error('Firebase not properly initialized');
+      showCustomDialog('Firebase initialization error. Please try again later.', 'alert');
+      return false;
+    }
+    return true;
+  }
+
+  // Add timeout to prevent infinite loading
+  function showLoadingWithTimeout() {
+    const loadingScreen = document.getElementById('loading-screen');
+    loadingScreen.style.display = 'flex';
+    
+    // Set a timeout to hide loading screen after 10 seconds
+    setTimeout(() => {
+      if (loadingScreen.style.display === 'flex') {
+        loadingScreen.style.display = 'none';
+        document.getElementById('auth-container').style.display = 'flex';
+        showCustomDialog('Loading took too long. Please try again.', 'alert');
+      }
+    }, 10000); // 10 seconds timeout
+  }
 }
