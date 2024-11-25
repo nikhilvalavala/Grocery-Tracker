@@ -3565,3 +3565,53 @@ h2 {
         font-size: 1.2rem;
     }
 }
+
+/* Update total amount styles */
+#total-amount {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 15px;
+    margin: 15px 0;
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #000;
+    transition: all 0.3s ease;
+}
+
+#total-amount i {
+    font-size: 1.3rem;
+    color: #000;
+}
+
+.total-amount-subtitle {
+    font-size: 0.85rem;
+    color: #666;
+    font-style: italic;
+}
+
+/* Mobile responsiveness for total amount */
+@media (max-width: 768px) {
+    #total-amount {
+        flex-direction: column;
+        align-items: flex-end;
+        font-size: 1.1rem;
+        padding: 10px 12px;
+    }
+
+    #total-amount .main-total {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    #total-amount i {
+        font-size: 1.2rem;
+    }
+
+    .total-amount-subtitle {
+        margin-top: 4px;
+        text-align: right;
+    }
+}

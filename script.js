@@ -789,25 +789,29 @@ function init() {
     return daysUntilExpiry <= 3;
   }
 
+  // Update the updateTotalAmount function
   function updateTotalAmount() {
     const items = getItemsFromStorage();
     const needItems = items.filter(item => item.status === 'need');
     const total = needItems
-      .filter(item => item.price > 0)
-      .reduce((sum, item) => sum + (parseFloat(item.price) * parseInt(item.quantity)), 0);
+        .filter(item => item.price > 0)
+        .reduce((sum, item) => sum + (parseFloat(item.price) * parseInt(item.quantity)), 0);
     
     const currencySymbol = getCurrencySymbol(currencySelect.value);
     const unknownPriceItems = needItems.filter(item => item.price === 0).length;
     
-    // Main total amount
-    let totalText = `<div class="total-amount-main">Estimated Total: ${currencySymbol}${total.toFixed(2)}</div>`;
+    const totalAmountElement = document.getElementById('total-amount');
     
-    // Add subtitle for unknown price items if any exist
-    if (unknownPriceItems > 0) {
-      totalText += `<div class="total-amount-subtitle">${unknownPriceItems} item${unknownPriceItems > 1 ? 's' : ''}, price unknown</div>`;
-    }
-    
-    totalAmount.innerHTML = totalText;
+    // Preserve the calculator icon and styling while updating the text
+    totalAmountElement.innerHTML = `
+        <div class="main-total">
+            <i class="fas fa-calculator"></i>
+            Estimated Total: ${currencySymbol}${total.toFixed(2)}
+        </div>
+        ${unknownPriceItems > 0 ? 
+            `<div class="total-amount-subtitle">${unknownPriceItems} item${unknownPriceItems > 1 ? 's' : ''}, price unknown</div>` 
+            : ''}
+    `;
   }
 
   setInterval(() => {
