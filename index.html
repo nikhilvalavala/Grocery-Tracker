@@ -148,9 +148,6 @@
       <div class="section">
         <div class="section-header">
           <h2>Groceries in Stock</h2>
-          <button class="btn-clear-section" data-list="current" title="Clear Current Items">
-            <i class="fas fa-trash-alt"></i>
-          </button>
         </div>
         
         <div class="subsections">
@@ -169,9 +166,6 @@
       <div class="section">
         <div class="section-header">
           <h2>Items Near Expiry/Expired</h2>
-          <button class="btn-clear-section" data-list="expiring" title="Clear Expiring Items">
-            <i class="fas fa-trash-alt"></i>
-          </button>
         </div>
         <ul id="expiring-list" class="items"></ul>
       </div>
@@ -179,13 +173,11 @@
       <div class="section">
         <div class="section-header">
           <h2>Shopping List</h2>
-          <button class="btn-clear-section" data-list="need" title="Clear Shopping List">
-            <i class="fas fa-trash-alt"></i>
-          </button>
         </div>
         <ul id="need-list" class="items"></ul>
-        <div id="total-amount" style="text-align: right; margin-top: 10px; font-weight: bold;">
-          Estimated Total: $0.00
+        <div id="total-amount">
+            <i class="fas fa-calculator"></i>
+            Estimated Total: $0.00
         </div>
       </div>
 
@@ -289,9 +281,6 @@
             <button class="btn" id="show-receipts-btn">
               <i class="fas fa-receipt"></i> View Receipts
             </button>
-            <button class="btn-clear-section" data-list="receipts" title="Clear All Receipts">
-              <i class="fas fa-trash-alt"></i>
-            </button>
           </div>
         </div>
         
@@ -366,5 +355,33 @@
     </script>
 
     <script type="module" src="script.js"></script>
+
+    <div class="clear-dropdown">
+        <button class="clear-btn" id="clearBtn" title="Clear Items">
+            <i class="fas fa-trash-alt"></i>
+        </button>
+        <div class="clear-menu" id="clearMenu">
+            <div class="clear-menu-item" data-clear="all" style="--item-index: 0">
+                <i class="fas fa-trash-alt"></i>
+                Clear Everything
+            </div>
+            <div class="clear-menu-item" data-clear="current" style="--item-index: 1">
+                <i class="fas fa-box"></i>
+                Clear Current Items
+            </div>
+            <div class="clear-menu-item" data-clear="expiring" style="--item-index: 2">
+                <i class="fas fa-clock"></i>
+                Clear Expiring Items
+            </div>
+            <div class="clear-menu-item" data-clear="need" style="--item-index: 3">
+                <i class="fas fa-shopping-cart"></i>
+                Clear Shopping List
+            </div>
+            <div class="clear-menu-item" data-clear="receipts" style="--item-index: 4">
+                <i class="fas fa-receipt"></i>
+                Clear Receipts
+            </div>
+        </div>
+    </div>
   </body>
 </html>

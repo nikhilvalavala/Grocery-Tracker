@@ -117,19 +117,52 @@ header h1 {
   box-sizing: border-box;
 }
 
-.btn {
-  background-color: #1a237e;
-  color: #fff;
-  border: none;
-  padding: 12px 25px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  cursor: pointer;
-  transition: background-color 0.3s;
+.btn, 
+.set-budget-btn, 
+.upload-btn {
+    background-color: #1a237e;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 25px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 1rem;
+    height: 45px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.btn:hover {
-  background-color: #283593;
+.btn:hover, 
+.set-budget-btn:hover, 
+.upload-btn:hover {
+    background-color: #283593;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.btn i, 
+.set-budget-btn i, 
+.upload-btn i {
+    font-size: 1.1rem;
+}
+
+/* Dark mode support */
+.dark-mode .btn,
+.dark-mode .set-budget-btn,
+.dark-mode .upload-btn {
+    background-color: #3949ab;
+}
+
+.dark-mode .btn:hover,
+.dark-mode .set-budget-btn:hover,
+.dark-mode .upload-btn:hover {
+    background-color: #5c6bc0;
 }
 
 .btn-clear {
@@ -2418,10 +2451,11 @@ h2 {
 #show-receipts-btn {
     display: flex;
     align-items: center;
-    gap: 5px;
-    padding: 8px 15px;
-    white-space: nowrap;
-    font-size: 0.95rem;
+    gap: 8px;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 500;
 }
 
 .btn-clear-section {
@@ -2442,66 +2476,39 @@ h2 {
 /* Mobile styles for receipt section */
 @media (max-width: 768px) {
     .section-header {
-        display: flex !important;
-        flex-direction: row !important; /* Force row direction */
-        justify-content: space-between !important;
-        align-items: center !important;
-        flex-wrap: nowrap !important; /* Prevent wrapping */
-        width: 100%;
-        margin-bottom: 15px;
-        padding: 10px 0;
-    }
-
-    .section h2 {
-        font-size: 1.3rem;
-        margin: 0;
-        padding-right: 10px;
-        flex: 1;
-    }
-
-    .btn-clear-section {
-        width: 35px;
-        height: 35px;
-        min-width: 35px;
-        margin-left: 10px;
-    }
-
-    /* Special styling only for receipt section */
-    .section:last-child .section-header {
-        flex-direction: column !important;
-        align-items: flex-start !important;
-    }
-
-    .section:last-child .receipt-header-actions {
-        width: 100%;
-        display: flex;
-        justify-content: space-between;
+        flex-direction: column;
         align-items: center;
+        gap: 15px;
+        text-align: center;
+    }
+
+    .receipt-header-actions {
+        width: 100%;
+        justify-content: center;
         margin-top: 10px;
     }
 
-    .section:last-child #show-receipts-btn {
-        flex: 1;
-        max-width: calc(100% - 50px);
-        margin-right: 10px;
+    #show-receipts-btn {
+        width: 80%;
+        max-width: 300px;
+        justify-content: center;
+        margin: 0 auto;
+    }
+
+    /* Ensure section title is centered */
+    .section-header h2 {
+        width: 100%;
+        text-align: center;
+        margin: 0;
     }
 }
 
-/* Extra small screen optimization */
+/* Extra small screens */
 @media (max-width: 360px) {
-    .section-header h2 {
-        font-size: 1.2rem;
-    }
-
     #show-receipts-btn {
-        font-size: 0.85rem;
-        padding: 8px;
-    }
-
-    .btn-clear-section {
-        width: 35px;
-        height: 35px;
-        min-width: 35px;
+        width: 90%;
+        font-size: 0.9rem;
+        padding: 8px 15px;
     }
 }
 
@@ -3376,4 +3383,185 @@ h2 {
 
 .dark-mode .total-amount-subtitle {
   color: #aaa;
+}
+
+/* Add these styles to your CSS file */
+.clear-dropdown {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 9999;
+}
+
+.clear-btn {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: #1a237e;
+    border: none;
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    transition: all 0.3s ease, background-color 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.clear-btn:hover {
+    transform: scale(1.1);
+    background: #283593;
+}
+
+.clear-menu {
+    position: absolute;
+    bottom: 70px;
+    right: 0;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    padding: 8px 0;
+    min-width: 200px;
+    opacity: 0;
+    transform: translateY(10px);
+    visibility: hidden;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.clear-menu.active {
+    opacity: 1;
+    transform: translateY(0);
+    visibility: visible;
+}
+
+.clear-menu-item {
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    color: #333;
+    font-size: 0.95rem;
+}
+
+.clear-menu-item:hover {
+    background-color: #f5f5f5;
+}
+
+.clear-menu-item i {
+    width: 20px;
+    text-align: center;
+    color: #1a237e;
+}
+
+/* Dark mode styles */
+.dark-mode .clear-btn {
+    background: #3949ab;
+}
+
+.dark-mode .clear-btn:hover {
+    background: #5c6bc0;
+}
+
+.dark-mode .clear-menu {
+    background: #1e1e1e;
+    border: 1px solid #333;
+}
+
+.dark-mode .clear-menu-item {
+    color: #fff;
+}
+
+.dark-mode .clear-menu-item:hover {
+    background-color: #333;
+}
+
+.dark-mode .clear-menu-item i {
+    color: #7986cb;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .clear-dropdown {
+        bottom: 15px;
+        right: 15px;
+    }
+
+    .clear-btn {
+        width: 50px;
+        height: 50px;
+        font-size: 20px;
+    }
+
+    .clear-menu {
+        bottom: 60px;
+        min-width: 180px;
+    }
+
+    .clear-menu-item {
+        padding: 10px 16px;
+        font-size: 0.9rem;
+    }
+}
+
+/* Animation for menu items */
+@keyframes menuItemFadeIn {
+    from {
+        opacity: 0;
+        transform: translateX(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.clear-menu-item {
+    animation: menuItemFadeIn 0.3s ease forwards;
+    animation-delay: calc(var(--item-index) * 0.05s);
+    opacity: 0;
+}
+
+/* Add these styles for the total amount */
+#total-amount {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 15px;
+    margin: 15px 0;
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #000;
+    transition: all 0.3s ease;
+}
+
+#total-amount i {
+    font-size: 1.3rem;
+    color: #000;
+}
+
+/* Dark mode support */
+.dark-mode #total-amount {
+    color: #fff;
+}
+
+.dark-mode #total-amount i {
+    color: #fff;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    #total-amount {
+        font-size: 1.1rem;
+        padding: 10px 12px;
+    }
+
+    #total-amount i {
+        font-size: 1.2rem;
+    }
 }

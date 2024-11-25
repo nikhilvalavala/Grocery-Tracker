@@ -78,19 +78,20 @@ function init() {
           // Merge data with server's data
           const mergedItems = mergeData(localItems, serverData.items || []);
           const mergedReceipts = mergeData(localReceipts, serverData.receipts || []);
+          const mergedBudget = serverData.monthlyBudget || localBudget;
           
           // Update local storage with merged data
           localStorage.setItem('items', JSON.stringify(mergedItems));
           localStorage.setItem('receipts', JSON.stringify(mergedReceipts));
-          localStorage.setItem('monthlyBudget', serverData.monthlyBudget || localBudget);
+          localStorage.setItem('monthlyBudget', mergedBudget);
           
           // Update server with merged data
           await setDoc(userDoc, {
             items: mergedItems,
             receipts: mergedReceipts,
-            monthlyBudget: serverData.monthlyBudget || localBudget,
+            monthlyBudget: mergedBudget,
             lastUpdated: Date.now(),
-            userId: currentUser.uid // Add user ID for security rules
+            userId: currentUser.uid
           });
           
           console.log('Sync completed successfully');
@@ -101,7 +102,7 @@ function init() {
             receipts: localReceipts,
             monthlyBudget: localBudget,
             lastUpdated: Date.now(),
-            userId: currentUser.uid // Add user ID for security rules
+            userId: currentUser.uid
           });
           
           console.log('Initial data push completed');
@@ -142,25 +143,11 @@ function init() {
   }
 
   currencySelect.addEventListener('change', function() {
-    localStorage.setItem('selectedCurrency', this.value);
+    const newCurrency = this.value;
+    localStorage.setItem('selectedCurrency', newCurrency);
     
-    // Clear and reload all lists
-    currentList.innerHTML = '';
-    expiringList.innerHTML = '';
-    needList.innerHTML = '';
-    
-    // Re-display all items with new currency
-    displayItems();
-    
-    // Update total amount immediately
-    updateTotalAmount();
-    
-    // If there are no items, still update the total amount display with new currency
-    if (getItemsFromStorage().length === 0) {
-      const currencySymbol = getCurrencySymbol(this.value);
-      totalAmount.textContent = `Estimated Total: ${currencySymbol}0.00`;
-    }
-    updateBudgetStats();
+    // Update all displays that show currency
+    updateAllCurrencyDisplays(newCurrency);
   });
 
   unknownPriceCheckbox.addEventListener('change', function() {
@@ -206,26 +193,38 @@ function init() {
         return;
       }
       
-      // Check if there's an existing budget
       const currentBudget = parseFloat(localStorage.getItem('monthlyBudget')) || 0;
       
-      // If it's not the first time, check if it's the same amount
       if (currentBudget !== 0 && budgetAmount === currentBudget) {
         await showCustomDialog('The budget amount is the same as the current budget. Please enter a different amount.', 'alert');
         return;
       }
       
-      // Different message for first time budget setting
       const message = currentBudget === 0 ? 
         'Are you sure you about the Budget amount?' : 
         'Are you sure you want to change the Budget amount?';
       
-      // Use the custom dialog instead of creating a new one
       const confirmed = await showCustomDialog(message);
       if (confirmed) {
         localStorage.setItem('monthlyBudget', budgetAmount.toString());
         const currencySymbol = getCurrencySymbol(currencySelect.value);
         currentBudgetDisplay.textContent = `${currencySymbol}${budgetAmount.toFixed(2)}`;
+        
+        if (currentUser) {
+          try {
+            const userDoc = doc(db, 'users', currentUser.uid);
+            await setDoc(userDoc, {
+              items: getItemsFromStorage(),
+              receipts: getReceipts(),
+              monthlyBudget: budgetAmount.toString(),
+              lastUpdated: Date.now()
+            });
+          } catch (error) {
+            console.error('Error syncing budget:', error);
+            await showCustomDialog('Error syncing budget. Please try again.', 'alert');
+          }
+        }
+        
         updateBudgetStats();
       } else {
         monthlyBudgetInput.value = currentBudget;
@@ -834,44 +833,55 @@ function init() {
 
   setInterval(checkAndMoveExpiringItems, 3600000);
 
-  document.querySelectorAll('.btn-clear-section').forEach(button => {
-    button.addEventListener('click', function() {
-      const listType = this.dataset.list;
-      clearSection(listType);
-    });
-  });
-
   function clearSection(listType) {
-    if (!confirm(`Are you sure you want to clear all ${listType === 'receipts' ? 'receipts' : 'items'} from this section?`)) return;
-
+    // Remove the duplicate confirmation since it's already handled in the clear menu click event
     let items = getItemsFromStorage();
     
     switch(listType) {
+        case 'all':
+            localStorage.removeItem('items');
+            localStorage.removeItem('receipts');
+            document.querySelectorAll('.items').forEach(list => list.innerHTML = '');
+            document.getElementById('receipts-list').innerHTML = '';
+            break;
         case 'current':
+            const filteredCurrent = items.filter(item => 
+                item.status !== 'current' || isExpiringSoon(item.expiry));
+            localStorage.setItem('items', JSON.stringify(filteredCurrent));
             document.getElementById('current-list-with-expiry').innerHTML = '';
             document.getElementById('current-list-no-expiry').innerHTML = '';
-            items = items.filter(item => item.status !== 'current' || isExpiringSoon(item.expiry));
             break;
         case 'expiring':
-            expiringList.innerHTML = '';
-            items = items.filter(item => !isExpiringSoon(item.expiry));
+            const filteredExpiring = items.filter(item => !isExpiringSoon(item.expiry));
+            localStorage.setItem('items', JSON.stringify(filteredExpiring));
+            document.getElementById('expiring-list').innerHTML = '';
             break;
         case 'need':
-            needList.innerHTML = '';
-            items = items.filter(item => item.status !== 'need');
+            const filteredNeed = items.filter(item => item.status !== 'need');
+            localStorage.setItem('items', JSON.stringify(filteredNeed));
+            document.getElementById('need-list').innerHTML = '';
             break;
         case 'receipts':
-            // Clear receipts from localStorage
             localStorage.removeItem('receipts');
-            // Update the display
-            displayReceipts();
-            // Update budget stats
-            updateBudgetStats();
-            return; // Return early as we don't need to update items storage
+            document.getElementById('receipts-list').innerHTML = '';
+            break;
     }
-
-    localStorage.setItem('items', JSON.stringify(items));
+    
+    // Sync with Firestore if user is logged in
+    if (currentUser) {
+        const userDoc = doc(db, 'users', currentUser.uid);
+        setDoc(userDoc, {
+            items: getItemsFromStorage(),
+            receipts: getReceipts(),
+            monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
+            lastUpdated: Date.now()
+        }).catch(error => {
+            console.error('Error syncing after clear:', error);
+        });
+    }
+    
     updateTotalAmount();
+    updateBudgetStats();
     checkUI();
   }
 
@@ -1433,40 +1443,54 @@ function init() {
 
   // Update the clearSection function
   async function clearSection(listType) {
-    const confirmed = await showCustomDialog(
-      `Are you sure you want to clear all ${listType === 'receipts' ? 'receipts' : 'items'} from this section?`
-    );
-    
-    if (!confirmed) return;
-
+    // Remove the duplicate confirmation since it's already handled in the clear menu click event
     let items = getItemsFromStorage();
     
     switch(listType) {
+      case 'all':
+        localStorage.removeItem('items');
+        localStorage.removeItem('receipts');
+        document.querySelectorAll('.items').forEach(list => list.innerHTML = '');
+        document.getElementById('receipts-list').innerHTML = '';
+        break;
       case 'current':
+        const filteredCurrent = items.filter(item => 
+          item.status !== 'current' || isExpiringSoon(item.expiry));
+        localStorage.setItem('items', JSON.stringify(filteredCurrent));
         document.getElementById('current-list-with-expiry').innerHTML = '';
         document.getElementById('current-list-no-expiry').innerHTML = '';
-        items = items.filter(item => item.status !== 'current' || isExpiringSoon(item.expiry));
         break;
       case 'expiring':
-        expiringList.innerHTML = '';
-        items = items.filter(item => !isExpiringSoon(item.expiry));
+        const filteredExpiring = items.filter(item => !isExpiringSoon(item.expiry));
+        localStorage.setItem('items', JSON.stringify(filteredExpiring));
+        document.getElementById('expiring-list').innerHTML = '';
         break;
       case 'need':
-        needList.innerHTML = '';
-        items = items.filter(item => item.status !== 'need');
+        const filteredNeed = items.filter(item => item.status !== 'need');
+        localStorage.setItem('items', JSON.stringify(filteredNeed));
+        document.getElementById('need-list').innerHTML = '';
         break;
       case 'receipts':
-        // Clear receipts from localStorage
         localStorage.removeItem('receipts');
-        // Update the display
-        displayReceipts();
-        // Update budget stats
-        updateBudgetStats();
-        return; // Return early as we don't need to update items storage
+        document.getElementById('receipts-list').innerHTML = '';
+        break;
     }
-
-    localStorage.setItem('items', JSON.stringify(items));
+    
+    // Sync with Firestore if user is logged in
+    if (currentUser) {
+        const userDoc = doc(db, 'users', currentUser.uid);
+        setDoc(userDoc, {
+            items: getItemsFromStorage(),
+            receipts: getReceipts(),
+            monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
+            lastUpdated: Date.now()
+        }).catch(error => {
+            console.error('Error syncing after clear:', error);
+        });
+    }
+    
     updateTotalAmount();
+    updateBudgetStats();
     checkUI();
   }
 
@@ -1496,20 +1520,37 @@ function init() {
     }
     
     const reader = new FileReader();
-    reader.onload = function(event) {
+    reader.onload = async function(event) {
       const receipt = {
         id: Date.now(),
         name: receiptName,
         date: receiptDate,
         amount: amount,
         file: event.target.result,
-        type: receiptFile.type
+        type: receiptFile.type,
+        timestamp: Date.now()
       };
       
       // Save receipt to localStorage
       const receipts = getReceipts();
       receipts.push(receipt);
       localStorage.setItem('receipts', JSON.stringify(receipts));
+      
+      // Sync with Firestore if user is logged in
+      if (currentUser) {
+        try {
+          const userDoc = doc(db, 'users', currentUser.uid);
+          await setDoc(userDoc, {
+            items: getItemsFromStorage(),
+            receipts: receipts,
+            monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
+            lastUpdated: Date.now()
+          });
+        } catch (error) {
+          console.error('Error syncing receipt:', error);
+          await showCustomDialog('Error syncing receipt. Please try again.', 'alert');
+        }
+      }
       
       // Show the receipts list if it's hidden
       const receiptsList = document.getElementById('receipts-list');
@@ -1534,9 +1575,30 @@ function init() {
   async function deleteReceipt(id) {
     const confirmed = await showCustomDialog('Are you sure you want to delete this receipt?');
     if (confirmed) {
+      // Get current receipts
       let receipts = getReceipts();
+      // Filter out the deleted receipt
       receipts = receipts.filter(receipt => receipt.id !== id);
+      // Update localStorage
       localStorage.setItem('receipts', JSON.stringify(receipts));
+
+      // Sync with Firestore if user is logged in
+      if (currentUser) {
+        try {
+          const userDoc = doc(db, 'users', currentUser.uid);
+          await setDoc(userDoc, {
+            items: getItemsFromStorage(),
+            receipts: receipts,  // Update with new receipts array
+            monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
+            lastUpdated: Date.now()
+          });
+        } catch (error) {
+          console.error('Error syncing receipt deletion:', error);
+          await showCustomDialog('Error syncing deletion. Please try again.', 'alert');
+        }
+      }
+
+      // Update UI
       displayReceipts();
       updateBudgetStats();
     }
@@ -1730,56 +1792,37 @@ function init() {
       document.getElementById('auth-container').style.display = 'none';
       
       console.log('Starting Google Sign In...');
-      const result = await Promise.race([
-        signInWithPopup(auth, provider),
-        new Promise((_, reject) => {
-          // Listen for popup closed event
-          const unsubscribe = auth.onAuthStateChanged((user) => {
-            if (!user) {
-              unsubscribe();
-              reject(new Error('Sign-in cancelled'));
-            }
-          });
-        })
-      ]);
-
-      console.log('Sign in successful:', result);
+      const result = await signInWithPopup(auth, provider);
       currentUser = result.user;
-      await initializeUserData();
+      
+      // Store token
+      const token = await result.user.getIdToken();
+      localStorage.setItem('authToken', token);
+      
     } catch (error) {
-      console.error('Detailed error:', error);
+      console.error('Sign in error:', error);
+      document.getElementById('loading-screen').style.display = 'none';
+      document.getElementById('auth-container').style.display = 'flex';
+      
       let errorMessage = 'Error signing in with Google. Please try again.';
-      
-      // Immediately hide loading screen and show auth container for cancelled sign-in
-      if (error.message === 'Sign-in cancelled' || 
-          error.code === 'auth/popup-closed-by-user' || 
-          error.code === 'auth/cancelled-popup-request') {
-        document.getElementById('loading-screen').style.display = 'none';
-        document.getElementById('auth-container').style.display = 'flex';
-        return; // Don't show error message for cancelled sign-in
-      }
-      
       switch (error.code) {
         case 'auth/popup-blocked':
-          errorMessage = 'Please allow popups for this website to sign in with Google.';
+          errorMessage = 'Please allow popups for this website to sign in.';
+          break;
+        case 'auth/popup-closed-by-user':
+          errorMessage = 'Sign-in was cancelled. Please try again.';
           break;
         case 'auth/unauthorized-domain':
-          errorMessage = 'This domain is not authorized. Please make sure you\'re accessing from an authorized domain.';
+          errorMessage = 'This domain is not authorized for sign-in.';
           break;
         case 'auth/network-request-failed':
-          errorMessage = 'Network error. Please check your internet connection and try again.';
+          errorMessage = 'Network error. Please check your connection.';
           break;
         default:
-          errorMessage = `Error signing in: ${error.message}`;
+          errorMessage = error.message;
       }
       
-      console.log('Error message:', errorMessage);
       await showCustomDialog(errorMessage, 'alert');
-      // Show auth container if there's an error
-      document.getElementById('auth-container').style.display = 'flex';
-    } finally {
-      // Hide loading screen
-      document.getElementById('loading-screen').style.display = 'none';
     }
   }
 
@@ -1789,14 +1832,30 @@ function init() {
       if (unsubscribeSnapshot) {
         unsubscribeSnapshot();
       }
+      
+      // Clear all auth-related data
+      localStorage.removeItem('authToken');
+      sessionStorage.clear();
+      
+      // Sign out from Firebase
       await signOut(auth);
       currentUser = null;
+      
+      // Clear application data
       localStorage.clear();
+      
+      // Clear any cached credentials
+      if (navigator.credentials && navigator.credentials.preventSilentAccess) {
+        await navigator.credentials.preventSilentAccess();
+      }
+      
+      // Reset UI
       displayItems();
       document.getElementById('auth-container').style.display = 'flex';
       document.getElementById('user-avatar').style.display = 'none';
       document.getElementById('user-name').textContent = '';
       document.getElementById('sign-out').style.display = 'none';
+      
     } catch (error) {
       console.error('Error signing out:', error);
       await showCustomDialog('Error signing out. Please try again.', 'alert');
@@ -1900,28 +1959,55 @@ function init() {
   // Add auth state observer
   onAuthStateChanged(auth, async (user) => {
     try {
-      // Only show loading screen if user is signing in
-      if (user && !currentUser) {
-        document.getElementById('loading-screen').style.display = 'flex';
-        document.getElementById('auth-container').style.display = 'none';
-      }
-      
-      currentUser = user;
+      const loadingScreen = document.getElementById('loading-screen');
+      const authContainer = document.getElementById('auth-container');
       
       if (user) {
         // User is signed in
-        await initializeUserData();
-        document.getElementById('auth-container').style.display = 'none';
+        currentUser = user;
+        
+        try {
+          // Get new token and store it
+          const token = await user.getIdToken(true);
+          localStorage.setItem('authToken', token);
+          
+          await initializeUserData();
+          authContainer.style.display = 'none';
+          
+          // Update UI for signed-in state
+          const userAvatar = document.getElementById('user-avatar');
+          const userName = document.getElementById('user-name');
+          const signOutBtn = document.getElementById('sign-out');
+          
+          userAvatar.src = user.photoURL;
+          userAvatar.style.display = 'block';
+          userName.textContent = user.displayName;
+          signOutBtn.style.display = 'block';
+          
+          // Clean up URL
+          if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
+        } catch (error) {
+          console.error('Error initializing user data:', error);
+          await showCustomDialog('Error loading your data. Please try again.', 'alert');
+        }
       } else {
         // User is not signed in
-        document.getElementById('auth-container').style.display = 'flex';
+        currentUser = null;
+        localStorage.removeItem('authToken');
+        authContainer.style.display = 'flex';
+        
+        // Reset UI
+        document.getElementById('user-avatar').style.display = 'none';
+        document.getElementById('user-name').textContent = '';
+        document.getElementById('sign-out').style.display = 'none';
       }
     } catch (error) {
       console.error('Auth state change error:', error);
-      // Show auth container if there's an error
       document.getElementById('auth-container').style.display = 'flex';
     } finally {
-      // Hide loading screen
+      // Always hide loading screen after auth state is determined
       document.getElementById('loading-screen').style.display = 'none';
     }
   });
@@ -1957,5 +2043,95 @@ function init() {
         showCustomDialog('Loading took too long. Please try again.', 'alert');
       }
     }, 10000); // 10 seconds timeout
+  }
+
+  // Add this function to your init() function
+  function initializeClearButton() {
+    const clearBtn = document.getElementById('clearBtn');
+    const clearMenu = document.getElementById('clearMenu');
+    let isMenuOpen = false;
+
+    if (!clearBtn || !clearMenu) return;
+
+    clearBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        isMenuOpen = !isMenuOpen;
+        clearMenu.classList.toggle('active', isMenuOpen);
+        clearBtn.style.transform = isMenuOpen ? 'rotate(135deg)' : 'rotate(0)';
+    });
+
+    document.querySelectorAll('.clear-menu-item').forEach(item => {
+        item.addEventListener('click', async function(e) {
+            e.stopPropagation();
+            const clearType = this.dataset.clear;
+            const confirmed = await showCustomDialog(
+                `Are you sure you want to clear ${clearType === 'all' ? 'everything' : 'all ' + clearType + ' items'}?`
+            );
+            
+            if (confirmed) {
+                await clearSection(clearType);
+                clearMenu.classList.remove('active');
+                isMenuOpen = false;
+                clearBtn.style.transform = 'rotate(0)';
+            }
+        });
+    });
+
+    // Close menu when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!clearBtn.contains(e.target) && !clearMenu.contains(e.target) && isMenuOpen) {
+            clearMenu.classList.remove('active');
+            isMenuOpen = false;
+            clearBtn.style.transform = 'rotate(0)';
+        }
+    });
+  }
+
+  // Add this line in your init() function after other initializations
+  initializeClearButton();
+
+  // Add this new function to handle all currency updates
+  function updateAllCurrencyDisplays(currency) {
+    const currencySymbol = getCurrencySymbol(currency);
+    
+    // Update shopping list items
+    const items = document.querySelectorAll('.item-price');
+    items.forEach(item => {
+        const priceText = item.textContent;
+        if (priceText.includes('Unknown')) return;
+        
+        const numbers = priceText.match(/[\d.]+/g);
+        if (numbers && numbers.length >= 2) {
+            const price = parseFloat(numbers[0]);
+            const quantity = parseInt(numbers[1]);
+            item.textContent = `${currencySymbol}${price.toFixed(2)} × ${quantity} = ${currencySymbol}${(price * quantity).toFixed(2)}`;
+        }
+    });
+    
+    // Update total amount
+    updateTotalAmount();
+    
+    // Update budget displays
+    const budget = parseFloat(localStorage.getItem('monthlyBudget')) || 0;
+    if (currentBudgetDisplay) {
+        currentBudgetDisplay.textContent = `${currencySymbol}${budget.toFixed(2)}`;
+    }
+    
+    // Update receipts display
+    displayReceipts();
+    
+    // Update budget stats
+    updateBudgetStats();
+    
+    // If there are no items, update the total amount display with new currency
+    if (getItemsFromStorage().length === 0) {
+        const totalAmountElement = document.getElementById('total-amount');
+        if (totalAmountElement) {
+            totalAmountElement.innerHTML = `
+                <i class="fas fa-calculator"></i>
+                Estimated Total: ${currencySymbol}0.00
+            `;
+        }
+    }
   }
 }

@@ -1,80 +1,145 @@
-# Grocery Tracker
+# Smart Grocery Manager
 
-A web-based application to help users manage their groceries by tracking currently available items, items that are expiring soon, and items that need to be purchased.
+A comprehensive web application for managing groceries, tracking expenses, and organizing receipts with cloud synchronization.
 
 ## Features
 
 ### 1. Item Management
-- Add new grocery items with details:
-  - Item name (automatically capitalizes first letter of each word)
+- Add and manage grocery items with detailed information:
+  - Item name (auto-capitalizes)
   - Quantity
-  - Status (Currently Available/Need to Buy)
-  - Expiration date (for currently available items)
-  - Price (for items that need to be bought)
+  - Status (In Stock/Shopping List)
+  - Expiration date (optional, with "N/A" option)
+  - Price (optional, with "Unknown" option)
+  - Multiple currency support
 
-### 2. Item Categories
-- **Currently Available**: Shows all items currently in stock
-- **Expiring Soon**: Automatically displays items expiring within 3 days
-- **Need to Buy**: Lists items that need to be purchased with price calculations
+### 2. Smart Organization
+- **Groceries in Stock**:
+  - Separate sections for items with and without expiry dates
+  - Automatic expiry tracking
+- **Items Near Expiry/Expired**:
+  - Automatic categorization of items nearing expiration
+  - Visual alerts for expired items
+- **Shopping List**:
+  - Price tracking and total calculation
+  - Support for items with unknown prices
 
-### 3. Item Actions
-- Edit existing items
-- Remove items
-- Clear entire sections using the trash icon
-- Visual indication for items being edited
-- Special highlighting for items expiring soon
+### 3. Budget Management
+- Set and track monthly budgets
+- Real-time budget statistics:
+  - Monthly budget overview
+  - Current expenditure
+  - Remaining budget
+  - Daily spending averages
+  - Monthly trends
+- Budget status indicators
+- Spending rate analysis
 
-### 4. Additional Features
-- Filter items across all categories
-- Automatic calculation of total amount to spend
-- Responsive design for mobile devices
-- Form validation for required fields
-- Duplicate item prevention
+### 4. Receipt Management
+- Upload and store receipts:
+  - Support for images and PDF files
+  - Receipt description
+  - Date tracking
+  - Amount tracking
+- View/hide receipts functionality
+- Receipt gallery with preview
+- Delete individual receipts
 
-## Usage
+### 5. Cloud Integration
+- Google authentication
+- Cross-device synchronization
+- Offline functionality
+- Automatic data backup
+- Real-time updates
 
-### Adding Items
-1. Enter item name
-2. Specify quantity
-3. Select status (Currently Available/Need to Buy)
-4. For currently available items: Add expiration date
-5. For items to buy: Add price per item
-6. Click "Add Item" button
+### 6. User Interface
+- Clean, modern design
+- Dark mode support
+- Responsive layout for all devices
+- Animated transitions
+- Interactive feedback
+- Unified clear functionality
+- Advanced filtering and sorting
 
-### Editing Items
-1. Click the edit icon on any item
-2. Modify the details in the form
-3. Click "Update Item" to save changes
-4. Click outside the form to cancel editing
+### 7. Data Management
+- Multi-currency support
+- Real-time calculations
+- Data persistence
+- Automatic synchronization
+- Conflict resolution
 
-### Filtering Items
-- Use the filter input to search across all items
-- Filter works on item names in real-time
-
-### Clearing Items
-- Use the trash icon in each section header to clear that section
-- Confirmation will be requested before deletion
-
-## Technical Details
+## Technical Features
 
 ### Built With
 - HTML5
 - CSS3
-- JavaScript (Vanilla)
-- Font Awesome for icons
-- Google Fonts (Poppins)
+- Vanilla JavaScript
+- Firebase Authentication
+- Cloud Firestore
+- Font Awesome icons
+- Google Fonts
 
-### Browser Storage
-- Uses localStorage for data persistence
-- Items remain saved even after browser refresh
+### Security
+- Secure authentication
+- Data encryption
+- Protected user data
+- Automatic session management
 
-### Responsive Design
-- Adapts to different screen sizes
-- Optimized for mobile devices
+### Performance
+- Optimized loading
+- Efficient data handling
+- Smooth animations
+- Responsive design
+- Offline capability
 
 ## Installation
 
 1. Clone the repository
-2. Open index.html in a web browser
-3. No additional installation or dependencies required
+2. Configure Firebase:
+   - Create a Firebase project
+   - Enable Authentication and Firestore
+   - Update firebase-config.js with your credentials
+3. Open index.html in a web browser
+
+## Usage
+
+### Getting Started
+1. Sign in with Google account
+2. Set your preferred currency
+3. Define monthly budget
+
+### Managing Items
+1. Add items with the input form
+2. Use checkboxes for optional fields
+3. Edit items by clicking the edit icon
+4. Move items between lists as needed
+
+### Receipt Management
+1. Upload receipts with description and date
+2. View receipts in the gallery
+3. Delete receipts as needed
+
+### Data Management
+1. Use the unified clear button for removing items
+2. Filter and sort items as needed
+3. Track budget statistics
+4. Monitor spending trends
+
+## Browser Support
+- Chrome (recommended)
+- Firefox
+- Safari
+- Edge
+- Mobile browsers
+
+## Contributing
+Contributions are welcome. Please follow these steps:
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Open a pull request
+
+## License
+This project is licensed under the MIT License.
 

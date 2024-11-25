@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
+import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
 import { getFirestore } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
 
 const firebaseConfig = {
@@ -13,30 +13,28 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-let app;
-let auth;
-let provider;
-let db;
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const provider = new GoogleAuthProvider();
+const db = getFirestore(app);
 
-try {
-  app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  provider = new GoogleAuthProvider();
-
-  // Configure Google Sign-in
-  provider.addScope('profile');
-  provider.addScope('email');
-  provider.setCustomParameters({
-    prompt: 'select_account'
+// Set persistence to LOCAL
+setPersistence(auth, browserLocalPersistence)
+  .then(() => {
+    console.log('Persistence set to LOCAL');
+  })
+  .catch((error) => {
+    console.error('Error setting persistence:', error);
   });
 
-  db = getFirestore(app);
+// Configure Google Sign-in
+provider.addScope('profile');
+provider.addScope('email');
+provider.setCustomParameters({
+  prompt: 'select_account'
+});
 
-  // Verify initialization
-  console.log('Firebase initialized successfully');
-  console.log('Current domain:', window.location.hostname);
-} catch (error) {
-  console.error('Firebase initialization error:', error);
-}
+console.log('Firebase initialized successfully');
+console.log('Current domain:', window.location.hostname);
 
 export { auth, provider, db }; 
