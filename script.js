@@ -889,7 +889,8 @@ function init() {
     checkUI();
   }
 
-  function handleReceiptUpload(e) {
+  // Update the handleReceiptUpload function
+  async function handleReceiptUpload(e) {
     e.preventDefault();
     
     const receiptName = document.getElementById('receipt-name').value;
@@ -898,88 +899,113 @@ function init() {
     const receiptFile = document.getElementById('receipt-file').files[0];
     
     if (!receiptName || !receiptDate || !receiptAmount || !receiptFile) {
-      alert('Please fill in all receipt details and upload a file');
-      return;
+        await showCustomDialog('Please fill in all receipt details and upload a file', 'alert');
+        return;
     }
     
     const amount = parseFloat(receiptAmount);
     if (isNaN(amount) || amount < 0) {
-      alert('Please enter a valid amount');
-      return;
+        await showCustomDialog('Please enter a valid amount', 'alert');
+        return;
     }
     
     if (receiptFile.size > 5 * 1024 * 1024) {
-      alert('File size must be less than 5MB');
-      return;
+        await showCustomDialog('File size must be less than 5MB', 'alert');
+        return;
     }
     
-    const reader = new FileReader();
-    reader.onload = function(event) {
-      const receipt = {
-        id: Date.now(),
-        name: receiptName,
-        date: receiptDate,
-        amount: amount,
-        file: event.target.result,
-        type: receiptFile.type
-      };
-      
-      // Save receipt to localStorage
-      const receipts = getReceipts();
-      receipts.push(receipt);
-      localStorage.setItem('receipts', JSON.stringify(receipts));
-      
-      // Show the receipts list if it's hidden
-      const receiptsList = document.getElementById('receipts-list');
-      if (receiptsList.style.display === 'none') {
-        receiptsList.style.display = 'grid';
-        const showReceiptsBtn = document.getElementById('show-receipts-btn');
-        if (showReceiptsBtn) {
-          showReceiptsBtn.innerHTML = '<i class="fas fa-times"></i> Hide Receipts';
-        }
-      }
-      
-      // Update UI
-      displayReceipts();
-      updateBudgetStats();
-      receiptForm.reset();
-    };
-    
-    reader.readAsDataURL(receiptFile);
-  }
+    try {
+        const reader = new FileReader();
+        reader.onload = async function(event) {
+            const newReceipt = {
+                id: Date.now(),
+                name: receiptName,
+                date: receiptDate,
+                amount: amount,
+                file: event.target.result,
+                type: receiptFile.type,
+                timestamp: Date.now()
+            };
+            
+            // Get existing receipts
+            const existingReceipts = getReceipts();
+            existingReceipts.push(newReceipt);
+            
+            // Save to localStorage
+            localStorage.setItem('receipts', JSON.stringify(existingReceipts));
+            
+            // Sync with Firebase if user is logged in
+            if (currentUser) {
+                try {
+                    const userDoc = doc(db, 'users', currentUser.uid);
+                    await setDoc(userDoc, {
+                        items: getItemsFromStorage(),
+                        receipts: existingReceipts,
+                        monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
+                        lastUpdated: Date.now()
+                    });
+                } catch (error) {
+                    console.error('Error syncing receipt:', error);
+                    await showCustomDialog('Error syncing receipt. Changes saved locally.', 'alert');
+                }
+            }
+            
+            // Show the receipts list
+            const receiptsList = document.getElementById('receipts-list');
+            const showReceiptsBtn = document.getElementById('show-receipts-btn');
+            
+            if (receiptsList) {
+                receiptsList.style.display = 'grid';
+                if (showReceiptsBtn) {
+                    showReceiptsBtn.innerHTML = '<i class="fas fa-times"></i> Hide Receipts';
+                }
+            }
+            
+            // Update UI
+            displayReceipts();
+            updateBudgetStats();
+            receiptForm.reset();
+        };
+        
+        reader.readAsDataURL(receiptFile);
+    } catch (error) {
+        console.error('Error processing receipt:', error);
+        await showCustomDialog('Error processing receipt. Please try again.', 'alert');
+    }
+}
 
-  function saveReceipt(receipt) {
-    const receipts = getReceipts();
-    receipts.push(receipt);
-    localStorage.setItem('receipts', JSON.stringify(receipts));
-  }
-
+  // Update the displayReceipts function
   function displayReceipts() {
     const receiptsList = document.getElementById('receipts-list');
-    if (!receiptsList) return;
+    const showReceiptsBtn = document.getElementById('show-receipts-btn');
     
-    // Clear existing receipts
-    receiptsList.innerHTML = '';
+    if (!receiptsList) return;
     
     try {
         // Get receipts and sort by date (latest first)
-        let receipts = getReceipts();
-        receipts.sort((a, b) => {
+        const storedReceipts = getReceipts();
+        storedReceipts.sort((a, b) => {
             const dateA = new Date(a.date + 'T00:00:00Z');
             const dateB = new Date(b.date + 'T00:00:00Z');
             return dateB - dateA;
         });
         
+        // Clear existing receipts
+        receiptsList.innerHTML = '';
+        
         const currencySymbol = getCurrencySymbol(currencySelect.value);
         
         // If no receipts, show a message
-        if (receipts.length === 0) {
+        if (storedReceipts.length === 0) {
             receiptsList.innerHTML = '<p style="text-align: center; color: #666;">No receipts found</p>';
+            if (showReceiptsBtn) {
+                showReceiptsBtn.innerHTML = '<i class="fas fa-receipt"></i> View Receipts';
+            }
             return;
         }
         
         // Create and append receipt cards
-        receipts.forEach(receipt => {
+        storedReceipts.forEach(receipt => {
             const div = document.createElement('div');
             div.className = 'receipt-card';
             
@@ -1036,158 +1062,12 @@ function init() {
         console.error('Error displaying receipts:', error);
         receiptsList.innerHTML = '<p style="text-align: center; color: #666;">Error loading receipts</p>';
     }
-  }
+}
 
-  receiptForm.addEventListener('submit', handleReceiptUpload);
-
-  function showMoveDialog(item) {
-    const overlay = document.createElement('div');
-    overlay.className = 'dialog-overlay';
-    document.body.appendChild(overlay);
-
-    const dialog = document.createElement('div');
-    dialog.className = 'move-item-dialog';
-    
-    const itemName = item.querySelector('.item-name').textContent;
-    
-    dialog.innerHTML = `
-      <h3>Move "${itemName}" to Groceries in Stock</h3>
-      <div style="margin-bottom: 30px;">
-        <label for="move-expiry-input">Expiration Date:</label>
-        <input type="date" id="move-expiry-input" class="form-input">
-        <div class="no-expiry" style="position: static; margin-top: 8px;">
-          <input type="checkbox" id="move-no-expiry-checkbox">
-          <label for="move-no-expiry-checkbox">No Expiry Date</label>
-        </div>
-      </div>
-      <div class="dialog-buttons">
-        <button class="cancel">Cancel</button>
-        <button class="confirm">Move Item</button>
-      </div>
-    `;
-    
-    document.body.appendChild(dialog);
-    
-    const expiryInput = dialog.querySelector('#move-expiry-input');
-    const noExpiryCheckbox = dialog.querySelector('#move-no-expiry-checkbox');
-    
-    noExpiryCheckbox.addEventListener('change', function() {
-      expiryInput.disabled = this.checked;
-    });
-    
-    dialog.querySelector('.cancel').addEventListener('click', () => {
-      dialog.remove();
-      overlay.remove();
-    });
-    
-    dialog.querySelector('.confirm').addEventListener('click', async () => {
-      const expiry = noExpiryCheckbox.checked ? '' : expiryInput.value;
-      
-      if (!noExpiryCheckbox.checked && !expiry) {
-        await showCustomDialog('Please select an expiration date or check "No Expiry Date"', 'alert');
-        return;
-      }
-      
-      await moveItemToCurrent(item, expiry);
-      dialog.remove();
-      overlay.remove();
-    });
-  }
-
-  async function moveItemToCurrent(item, expiry) {
-    const name = item.querySelector('.item-name').textContent;
-    const quantity = parseInt(item.querySelector('.item-quantity').textContent);
-    
-    // Get all items from storage
-    let items = getItemsFromStorage();
-    
-    // Find the item to update
-    const itemIndex = items.findIndex(i => i.name === name);
-    if (itemIndex === -1) return;
-    
-    // Create updated item
-    const updatedItem = {
-      ...items[itemIndex],
-      id: Date.now().toString(),
-      status: 'current',
-      expiry: expiry || '',
-      timestamp: Date.now()
-    };
-    
-    // Remove old item and add updated one
-    items = items.filter(item => item.name !== name);
-    items.push(updatedItem);
-    
-    // Save to localStorage
-    localStorage.setItem('items', JSON.stringify(items));
-    
-    // Sync with Firestore if user is logged in
-    if (currentUser) {
-      try {
-        const userDoc = doc(db, 'users', currentUser.uid);
-        await setDoc(userDoc, {
-          items,
-          receipts: getReceipts(),
-          monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
-          lastUpdated: Date.now()
-        });
-        
-        // Remove the item from DOM - the Firestore listener will handle adding it to the correct list
-        item.remove();
-        
-        // Update UI without adding to DOM (Firestore listener will handle that)
-        updateTotalAmount();
-        checkUI();
-      } catch (error) {
-        console.error('Error syncing move:', error);
-        await showCustomDialog('Error syncing move. Please try again.', 'alert');
-        
-        // If there's an error, update the DOM directly
-        item.remove();
-        addItemToDOM(name, quantity, 'current', expiry);
-        updateTotalAmount();
-        checkUI();
-      }
-    } else {
-      // If offline, update the DOM directly
-      item.remove();
-      addItemToDOM(name, quantity, 'current', expiry);
-      updateTotalAmount();
-      checkUI();
-    }
-  }
-
-  function initializeBudget() {
-    const savedBudget = localStorage.getItem('monthlyBudget');
-    
-    if (savedBudget) {
-      const budgetAmount = parseFloat(savedBudget);
-      const currencySymbol = getCurrencySymbol(currencySelect.value);
-      
-      currentBudgetDisplay.textContent = `${currencySymbol}${budgetAmount.toFixed(2)}`;
-      
-      monthlyBudgetInput.value = budgetAmount;
-      
-      updateBudgetStats();
-    } else {
-      localStorage.setItem('monthlyBudget', '0');
-      const currencySymbol = getCurrencySymbol(currencySelect.value);
-      currentBudgetDisplay.textContent = `${currencySymbol}0.00`;
-      monthlyBudgetInput.value = '';
-    }
-  }
-
-  function formatCurrency(amount) {
-    const currencySymbol = getCurrencySymbol(currencySelect.value);
-    return `${currencySymbol}${amount.toFixed(2)}`;
-  }
-
-  function deleteReceipt(id) {
-    let receipts = getReceipts();
-    receipts = receipts.filter(receipt => receipt.id !== id);
+  function saveReceipt(receipt) {
+    const receipts = getReceipts();
+    receipts.push(receipt);
     localStorage.setItem('receipts', JSON.stringify(receipts));
-    displayReceipts();
-    updateBudgetStats();
   }
 
   function viewReceipt(receipt) {
@@ -1496,83 +1376,6 @@ function init() {
     updateTotalAmount();
     updateBudgetStats();
     checkUI();
-  }
-
-  // Update the handleReceiptUpload function's validation
-  async function handleReceiptUpload(e) {
-    e.preventDefault();
-    
-    const receiptName = document.getElementById('receipt-name').value;
-    const receiptDate = document.getElementById('receipt-date').value;
-    const receiptAmount = document.getElementById('receipt-amount').value;
-    const receiptFile = document.getElementById('receipt-file').files[0];
-    
-    if (!receiptName || !receiptDate || !receiptAmount || !receiptFile) {
-      await showCustomDialog('Please fill in all receipt details and upload a file', 'alert');
-      return;
-    }
-    
-    const amount = parseFloat(receiptAmount);
-    if (isNaN(amount) || amount < 0) {
-      await showCustomDialog('Please enter a valid amount', 'alert');
-      return;
-    }
-    
-    if (receiptFile.size > 5 * 1024 * 1024) {
-      await showCustomDialog('File size must be less than 5MB', 'alert');
-      return;
-    }
-    
-    const reader = new FileReader();
-    reader.onload = async function(event) {
-      const receipt = {
-        id: Date.now(),
-        name: receiptName,
-        date: receiptDate,
-        amount: amount,
-        file: event.target.result,
-        type: receiptFile.type,
-        timestamp: Date.now()
-      };
-      
-      // Save receipt to localStorage
-      const receipts = getReceipts();
-      receipts.push(receipt);
-      localStorage.setItem('receipts', JSON.stringify(receipts));
-      
-      // Sync with Firestore if user is logged in
-      if (currentUser) {
-        try {
-          const userDoc = doc(db, 'users', currentUser.uid);
-          await setDoc(userDoc, {
-            items: getItemsFromStorage(),
-            receipts: receipts,
-            monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
-            lastUpdated: Date.now()
-          });
-        } catch (error) {
-          console.error('Error syncing receipt:', error);
-          await showCustomDialog('Error syncing receipt. Please try again.', 'alert');
-        }
-      }
-      
-      // Show the receipts list if it's hidden
-      const receiptsList = document.getElementById('receipts-list');
-      if (receiptsList.style.display === 'none') {
-        receiptsList.style.display = 'grid';
-        const showReceiptsBtn = document.getElementById('show-receipts-btn');
-        if (showReceiptsBtn) {
-          showReceiptsBtn.innerHTML = '<i class="fas fa-times"></i> Hide Receipts';
-        }
-      }
-      
-      // Update UI
-      displayReceipts();
-      updateBudgetStats();
-      receiptForm.reset();
-    };
-    
-    reader.readAsDataURL(receiptFile);
   }
 
   // Update the deleteReceipt function
