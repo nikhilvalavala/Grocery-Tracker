@@ -933,7 +933,40 @@ function init() {
     e.preventDefault();
     
     try {
-        // ... existing validation code ...
+        // Get form elements and validate they exist
+        const receiptNameInput = document.getElementById('receipt-name');
+        const receiptDateInput = document.getElementById('receipt-date');
+        const receiptAmountInput = document.getElementById('receipt-amount');
+        const receiptFileInput = document.getElementById('receipt-file');
+        
+        if (!receiptNameInput || !receiptDateInput || !receiptAmountInput || !receiptFileInput) {
+            throw new Error('Required form elements not found');
+        }
+        
+        // Get values
+        const receiptName = receiptNameInput.value.trim();
+        const receiptDate = receiptDateInput.value;
+        const receiptAmount = receiptAmountInput.value.trim();
+        const receiptFile = receiptFileInput.files[0];
+        
+        // Validate all fields are filled
+        const missingFields = [];
+        if (!receiptName) missingFields.push('Receipt Name');
+        if (!receiptDate) missingFields.push('Date');
+        if (!receiptAmount) missingFields.push('Amount');
+        if (!receiptFile) missingFields.push('Receipt File');
+        
+        if (missingFields.length > 0) {
+            await showCustomDialog(`Please fill in the following fields: ${missingFields.join(', ')}`, 'alert');
+            return;
+        }
+
+        // Validate amount
+        const amount = parseFloat(receiptAmount);
+        if (isNaN(amount) || amount < 0) {
+            await showCustomDialog('Please enter a valid amount', 'alert');
+            return;
+        }
 
         // Compress image if it's an image file
         let fileData;
@@ -993,7 +1026,52 @@ function init() {
                 }
             }
 
-            // ... rest of the function (Firebase sync, etc.) ...
+            // If offline, store in pending updates
+            if (!navigator.onLine) {
+                const pendingUpdates = JSON.parse(localStorage.getItem('pendingUpdates') || '[]');
+                pendingUpdates.push({
+                    type: 'receipt',
+                    data: newReceipt,
+                    timestamp: Date.now()
+                });
+                localStorage.setItem('pendingUpdates', JSON.stringify(pendingUpdates));
+                
+                await showCustomDialog('Receipt saved locally. Will sync when connection is restored.', 'info');
+            } else {
+                // Try to sync with Firebase if online
+                try {
+                    if (currentUser) {
+                        const userDoc = doc(window.firebaseDb, 'users', currentUser.uid);
+                        await setDoc(userDoc, {
+                            items: getItemsFromStorage(),
+                            receipts: existingReceipts,
+                            monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
+                            lastUpdated: Date.now()
+                        }, { merge: true });
+                    }
+                } catch (syncError) {
+                    console.error('Error syncing with server:', syncError);
+                    await showCustomDialog('Receipt saved locally. Will retry sync later.', 'info');
+                }
+            }
+
+            // Show the receipts list
+            const receiptsList = document.getElementById('receipts-list');
+            const showReceiptsBtn = document.getElementById('show-receipts-btn');
+            
+            if (receiptsList) {
+                receiptsList.style.display = 'grid';
+                if (showReceiptsBtn) {
+                    showReceiptsBtn.innerHTML = '<i class="fas fa-times"></i> Hide Receipts';
+                }
+            }
+
+            // Update UI
+            displayReceipts();
+            updateBudgetStats();
+            
+            // Reset form
+            document.getElementById('receipt-form').reset();
 
         } catch (error) {
             throw new Error(`Storage error: ${error.message}`);
@@ -2210,6 +2288,16 @@ function init() {
             console.error('Periodic sync failed:', error);
         }
     }, 5 * 60 * 1000);
+
+    // Initialize the observer
+    const domObserver = initializeDOMObserver();
+
+    // Clean up function (if needed)
+    window.addEventListener('unload', () => {
+        if (domObserver) {
+            domObserver.disconnect();
+        }
+    });
   }
 
   // Add this helper function
@@ -2229,31 +2317,43 @@ function init() {
     // Rest of your init function...
   }
 
-  // Add this function to clear old receipts
-  async function clearOldReceipts() {
-    const confirmed = await showCustomDialog(
-        'This will delete receipts older than 3 months. Continue?',
-        'confirm'
-    );
-    
-    if (confirmed) {
-        const receipts = getReceipts();
-        const threeMonthsAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
-        
-        const newReceipts = receipts.filter(receipt => 
-            receipt.timestamp > threeMonthsAgo
-        );
-        
-        localStorage.setItem('receipts', JSON.stringify(newReceipts));
-        displayReceipts();
-        
-        await showCustomDialog(
-            `Cleared ${receipts.length - newReceipts.length} old receipts`,
-            'info'
-        );
-    }
-  }
+  // Replace any DOMSubtreeModified event listeners with MutationObserver
+  function initializeDOMObserver() {
+    const currentListWithExpiry = document.getElementById('current-list-with-expiry');
+    const currentListNoExpiry = document.getElementById('current-list-no-expiry');
+    const needList = document.getElementById('need-list');
+    const expiringList = document.getElementById('expiring-list');
+    const receiptsList = document.getElementById('receipts-list');
 
-  // Add this to your init function
-  document.getElementById('clear-old-receipts-btn')?.addEventListener('click', clearOldReceipts);
+    const targetNodes = [
+        currentListWithExpiry,
+        currentListNoExpiry,
+        needList,
+        expiringList,
+        receiptsList
+    ].filter(node => node); // Filter out any null elements
+
+    const config = {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true
+    };
+
+    const observer = new MutationObserver((mutationsList) => {
+        // Debounce the updates to prevent too many rapid updates
+        clearTimeout(window.updateTimeout);
+        window.updateTimeout = setTimeout(() => {
+            updateTotalAmount();
+            updateBudgetStats();
+            checkUI();
+        }, 100);
+    });
+
+    targetNodes.forEach(node => {
+        observer.observe(node, config);
+    });
+
+    return observer;
+  }
 }
