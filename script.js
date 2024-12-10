@@ -1,6 +1,6 @@
 import { auth, provider, db } from './firebase-config.js';
 import { signInWithPopup, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
-import { doc, setDoc, getDoc, onSnapshot, collection, enableIndexedDbPersistence } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+import { doc, setDoc, getDoc, onSnapshot, collection, enableIndexedDbPersistence, runTransaction } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
 
 document.addEventListener('DOMContentLoaded', init);
 
@@ -893,63 +893,166 @@ function init() {
   async function handleReceiptUpload(e) {
     e.preventDefault();
     
-    const receiptName = document.getElementById('receipt-name').value;
-    const receiptDate = document.getElementById('receipt-date').value;
-    const receiptAmount = document.getElementById('receipt-amount').value;
-    const receiptFile = document.getElementById('receipt-file').files[0];
-    
-    if (!receiptName || !receiptDate || !receiptAmount || !receiptFile) {
-        await showCustomDialog('Please fill in all receipt details and upload a file', 'alert');
-        return;
-    }
-    
-    const amount = parseFloat(receiptAmount);
-    if (isNaN(amount) || amount < 0) {
-        await showCustomDialog('Please enter a valid amount', 'alert');
-        return;
-    }
-    
-    if (receiptFile.size > 5 * 1024 * 1024) {
-        await showCustomDialog('File size must be less than 5MB', 'alert');
-        return;
-    }
-    
     try {
-        const reader = new FileReader();
-        reader.onload = async function(event) {
-            const newReceipt = {
-                id: Date.now(),
-                name: receiptName,
-                date: receiptDate,
-                amount: amount,
-                file: event.target.result,
-                type: receiptFile.type,
-                timestamp: Date.now()
-            };
-            
-            // Get existing receipts
-            const existingReceipts = getReceipts();
-            existingReceipts.push(newReceipt);
-            
-            // Save to localStorage
-            localStorage.setItem('receipts', JSON.stringify(existingReceipts));
-            
-            // Sync with Firebase if user is logged in
-            if (currentUser) {
-                try {
-                    const userDoc = doc(db, 'users', currentUser.uid);
-                    await setDoc(userDoc, {
-                        items: getItemsFromStorage(),
-                        receipts: existingReceipts,
-                        monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
-                        lastUpdated: Date.now()
-                    });
-                } catch (error) {
-                    console.error('Error syncing receipt:', error);
-                    await showCustomDialog('Error syncing receipt. Changes saved locally.', 'alert');
+        // Get form elements and validate they exist
+        const receiptNameInput = document.getElementById('receipt-name');
+        const receiptDateInput = document.getElementById('receipt-date');
+        const receiptAmountInput = document.getElementById('receipt-amount');
+        const receiptFileInput = document.getElementById('receipt-file');
+        
+        if (!receiptNameInput || !receiptDateInput || !receiptAmountInput || !receiptFileInput) {
+            throw new Error('Required form elements not found');
+        }
+        
+        // Get values
+        const receiptName = receiptNameInput.value.trim();
+        const receiptDate = receiptDateInput.value;
+        const receiptAmount = receiptAmountInput.value.trim();
+        const receiptFile = receiptFileInput.files[0];
+        
+        // Validate all fields are filled
+        const missingFields = [];
+        if (!receiptName) missingFields.push('Receipt Name');
+        if (!receiptDate) missingFields.push('Date');
+        if (!receiptAmount) missingFields.push('Amount');
+        if (!receiptFile) missingFields.push('Receipt File');
+        
+        if (missingFields.length > 0) {
+            await showCustomDialog(`Please fill in the following fields: ${missingFields.join(', ')}`, 'alert');
+            return;
+        }
+        
+        // Validate amount
+        const amount = parseFloat(receiptAmount);
+        if (isNaN(amount) || amount < 0) {
+            await showCustomDialog('Please enter a valid amount', 'alert');
+            return;
+        }
+        
+        // Validate file size (5MB limit)
+        if (receiptFile.size > 5 * 1024 * 1024) {
+            await showCustomDialog('File size must be less than 5MB', 'alert');
+            return;
+        }
+        
+        // Validate file type
+        const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
+        if (!allowedTypes.includes(receiptFile.type)) {
+            await showCustomDialog('Please upload a valid file (JPEG, PNG, or PDF)', 'alert');
+            return;
+        }
+        
+        // Read file
+        let fileData;
+        try {
+            fileData = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (event) => resolve(event.target.result);
+                reader.onerror = (error) => reject(new Error('Error reading file: ' + error.message));
+                reader.readAsDataURL(receiptFile);
+            });
+        } catch (fileError) {
+            console.error('File reading error:', fileError);
+            await showCustomDialog('Error reading file. Please try again.', 'alert');
+            return;
+        }
+        
+        // Create new receipt object with version
+        const newReceipt = {
+            id: Date.now(),
+            name: receiptName,
+            date: receiptDate,
+            amount: amount,
+            file: fileData,
+            type: receiptFile.type,
+            timestamp: Date.now(),
+            version: generateVersion()
+        };
+        
+        // Get and update existing receipts with optimistic locking
+        let existingReceipts;
+        try {
+            // Get current server state if online
+            let serverReceipts = [];
+            if (currentUser && navigator.onLine) {
+                const userDoc = doc(db, 'users', currentUser.uid);
+                const docSnap = await getDoc(userDoc);
+                if (docSnap.exists()) {
+                    serverReceipts = docSnap.data().receipts || [];
                 }
             }
             
+            // Get local receipts
+            existingReceipts = getReceipts();
+            
+            // Resolve any conflicts
+            if (serverReceipts.length > 0) {
+                existingReceipts = await resolveConflict(
+                    { data: existingReceipts, lastUpdated: localStorage.getItem('lastUpdated') },
+                    { data: serverReceipts, lastUpdated: serverReceipts.lastUpdated }
+                ).data;
+            }
+            
+            // Add new receipt
+            existingReceipts.push(newReceipt);
+            
+            // Update local storage with version info
+            const updateData = {
+                receipts: existingReceipts,
+                lastUpdated: Date.now(),
+                version: generateVersion()
+            };
+            
+            localStorage.setItem('receipts', JSON.stringify(existingReceipts));
+            localStorage.setItem('lastUpdated', updateData.lastUpdated);
+            localStorage.setItem('dataVersion', updateData.version);
+            
+            // Sync with Firebase if online
+            if (currentUser && navigator.onLine) {
+                const userDoc = doc(db, 'users', currentUser.uid);
+                
+                // Use transaction for atomic updates
+                await runTransaction(db, async (transaction) => {
+                    const docSnap = await transaction.get(userDoc);
+                    
+                    if (!docSnap.exists()) {
+                        transaction.set(userDoc, {
+                            ...updateData,
+                            items: getItemsFromStorage(),
+                            monthlyBudget: localStorage.getItem('monthlyBudget') || '0'
+                        });
+                    } else {
+                        const serverData = docSnap.data();
+                        
+                        // Check if data was modified since we started
+                        if (serverData.lastUpdated > updateData.lastUpdated) {
+                            // Handle conflict
+                            const resolvedData = await resolveConflict(updateData, serverData);
+                            transaction.set(userDoc, resolvedData);
+                        } else {
+                            transaction.update(userDoc, updateData);
+                        }
+                    }
+                });
+            }
+            
+        } catch (error) {
+            console.error('Error in concurrency control:', error);
+            // Store failed updates for later sync
+            const pendingUpdates = JSON.parse(localStorage.getItem('pendingUpdates') || '[]');
+            pendingUpdates.push({
+                type: 'receipt',
+                data: newReceipt,
+                timestamp: Date.now(),
+                version: generateVersion()
+            });
+            localStorage.setItem('pendingUpdates', JSON.stringify(pendingUpdates));
+            
+            await showCustomDialog('Changes saved locally. Will sync when connection is restored.', 'alert');
+        }
+        
+        // Update UI
+        try {
             // Show the receipts list
             const receiptsList = document.getElementById('receipts-list');
             const showReceiptsBtn = document.getElementById('show-receipts-btn');
@@ -961,41 +1064,70 @@ function init() {
                 }
             }
             
-            // Update UI
+            // Update displays
             displayReceipts();
             updateBudgetStats();
-            receiptForm.reset();
-        };
+            
+            // Reset form
+            document.getElementById('receipt-form').reset();
+        } catch (uiError) {
+            console.error('UI update error:', uiError);
+            await showCustomDialog('Error updating display. Please refresh the page.', 'alert');
+            // Don't return here as the data was saved successfully
+        }
         
-        reader.readAsDataURL(receiptFile);
     } catch (error) {
-        console.error('Error processing receipt:', error);
-        await showCustomDialog('Error processing receipt. Please try again.', 'alert');
+        console.error('Critical error in receipt upload:', error);
+        await showCustomDialog('An unexpected error occurred. Please try again.', 'alert');
     }
 }
 
   // Update the displayReceipts function
   function displayReceipts() {
-    const receiptsList = document.getElementById('receipts-list');
-    const showReceiptsBtn = document.getElementById('show-receipts-btn');
-    
-    if (!receiptsList) return;
-    
     try {
-        // Get receipts and sort by date (latest first)
-        const storedReceipts = getReceipts();
-        storedReceipts.sort((a, b) => {
-            const dateA = new Date(a.date + 'T00:00:00Z');
-            const dateB = new Date(b.date + 'T00:00:00Z');
-            return dateB - dateA;
-        });
+        const receiptsList = document.getElementById('receipts-list');
+        const showReceiptsBtn = document.getElementById('show-receipts-btn');
+        
+        if (!receiptsList) {
+            console.error('Receipts list element not found');
+            return;
+        }
+        
+        // Get receipts and validate
+        let storedReceipts;
+        try {
+            storedReceipts = getReceipts();
+            if (!Array.isArray(storedReceipts)) {
+                throw new Error('Invalid receipts data structure');
+            }
+        } catch (error) {
+            console.error('Error loading receipts:', error);
+            receiptsList.innerHTML = '<p style="text-align: center; color: #666;">Error loading receipts</p>';
+            return;
+        }
+        
+        // Sort receipts
+        try {
+            storedReceipts.sort((a, b) => {
+                const dateA = new Date(a.date + 'T00:00:00Z');
+                const dateB = new Date(b.date + 'T00:00:00Z');
+                if (isNaN(dateA.getTime()) || isNaN(dateB.getTime())) {
+                    throw new Error('Invalid date format');
+                }
+                return dateB - dateA;
+            });
+        } catch (error) {
+            console.error('Error sorting receipts:', error);
+            // Continue with unsorted receipts
+        }
         
         // Clear existing receipts
         receiptsList.innerHTML = '';
         
-        const currencySymbol = getCurrencySymbol(currencySelect.value);
+        // Get currency symbol
+        const currencySymbol = getCurrencySymbol(currencySelect?.value || 'USD');
         
-        // If no receipts, show a message
+        // Handle empty receipts
         if (storedReceipts.length === 0) {
             receiptsList.innerHTML = '<p style="text-align: center; color: #666;">No receipts found</p>';
             if (showReceiptsBtn) {
@@ -1006,61 +1138,71 @@ function init() {
         
         // Create and append receipt cards
         storedReceipts.forEach(receipt => {
-            const div = document.createElement('div');
-            div.className = 'receipt-card';
-            
-            // Create date without timezone offset
-            const receiptDate = new Date(receipt.date + 'T00:00:00Z');
-            
-            const isImage = receipt.type.startsWith('image/');
-            const previewContent = isImage 
-                ? `<img src="${receipt.file}" alt="Receipt preview">` 
-                : '<i class="fas fa-file-pdf fa-3x"></i>';
-            
-            div.innerHTML = `
-                <div class="receipt-header">
-                    <h3 class="receipt-title">${receipt.name}</h3>
-                    <span class="receipt-date">${receiptDate.toLocaleDateString('en-US', {
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric',
-                        timeZone: 'UTC'
-                    })}</span>
-                </div>
-                <div class="receipt-preview">
-                    ${previewContent}
-                </div>
-                <div class="receipt-amount">
-                    Total: ${currencySymbol}${parseFloat(receipt.amount).toFixed(2)}
-                </div>
-                <div class="receipt-actions">
-                    <button class="view-receipt">
-                        <i class="fas fa-eye"></i> View
-                    </button>
-                    <button class="delete-receipt" data-id="${receipt.id}">
-                        <i class="fas fa-trash"></i> Delete
-                    </button>
-                </div>
-            `;
-            
-            // Add event listeners
-            div.querySelector('.view-receipt').addEventListener('click', () => {
-                viewReceipt(receipt);
-            });
-            
-            div.querySelector('.delete-receipt').addEventListener('click', async () => {
-                const confirmed = await showCustomDialog('Are you sure you want to delete this receipt?');
-                if (confirmed) {
-                    deleteReceipt(receipt.id);
+            try {
+                const div = document.createElement('div');
+                div.className = 'receipt-card';
+                
+                // Validate receipt date
+                const receiptDate = new Date(receipt.date + 'T00:00:00Z');
+                if (isNaN(receiptDate.getTime())) {
+                    throw new Error('Invalid receipt date');
                 }
-            });
-            
-            receiptsList.appendChild(div);
+                
+                const isImage = receipt.type?.startsWith('image/');
+                const previewContent = isImage 
+                    ? `<img src="${receipt.file}" alt="Receipt preview">` 
+                    : '<i class="fas fa-file-pdf fa-3x"></i>';
+                
+                div.innerHTML = `
+                    <div class="receipt-header">
+                        <h3 class="receipt-title">${receipt.name || 'Unnamed Receipt'}</h3>
+                        <span class="receipt-date">${receiptDate.toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric',
+                            timeZone: 'UTC'
+                        })}</span>
+                    </div>
+                    <div class="receipt-preview">
+                        ${previewContent}
+                    </div>
+                    <div class="receipt-amount">
+                        Total: ${currencySymbol}${parseFloat(receipt.amount || 0).toFixed(2)}
+                    </div>
+                    <div class="receipt-actions">
+                        <button class="view-receipt">
+                            <i class="fas fa-eye"></i> View
+                        </button>
+                        <button class="delete-receipt" data-id="${receipt.id}">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                    </div>
+                `;
+                
+                // Add event listeners
+                div.querySelector('.view-receipt').addEventListener('click', () => {
+                    viewReceipt(receipt);
+                });
+                
+                div.querySelector('.delete-receipt').addEventListener('click', async () => {
+                    const confirmed = await showCustomDialog('Are you sure you want to delete this receipt?');
+                    if (confirmed) {
+                        deleteReceipt(receipt.id);
+                    }
+                });
+                
+                receiptsList.appendChild(div);
+            } catch (cardError) {
+                console.error('Error creating receipt card:', cardError);
+                // Skip this receipt and continue with others
+            }
         });
         
     } catch (error) {
         console.error('Error displaying receipts:', error);
-        receiptsList.innerHTML = '<p style="text-align: center; color: #666;">Error loading receipts</p>';
+        if (receiptsList) {
+            receiptsList.innerHTML = '<p style="text-align: center; color: #666;">Error loading receipts</p>';
+        }
     }
 }
 
@@ -1899,46 +2041,186 @@ function init() {
 
   // Add this new function to handle all currency updates
   function updateAllCurrencyDisplays(currency) {
-    const currencySymbol = getCurrencySymbol(currency);
-    
-    // Update shopping list items
-    const items = document.querySelectorAll('.item-price');
-    items.forEach(item => {
-        const priceText = item.textContent;
-        if (priceText.includes('Unknown')) return;
+    try {
+        if (!currency) {
+            throw new Error('Invalid currency value');
+        }
         
-        const numbers = priceText.match(/[\d.]+/g);
-        if (numbers && numbers.length >= 2) {
-            const price = parseFloat(numbers[0]);
-            const quantity = parseInt(numbers[1]);
-            item.textContent = `${currencySymbol}${price.toFixed(2)} × ${quantity} = ${currencySymbol}${(price * quantity).toFixed(2)}`;
+        const currencySymbol = getCurrencySymbol(currency);
+        if (!currencySymbol) {
+            throw new Error('Invalid currency symbol');
+        }
+        
+        // Update shopping list items
+        const items = document.querySelectorAll('.item-price');
+        items.forEach(item => {
+            try {
+                const priceText = item.textContent;
+                if (priceText.includes('Unknown')) return;
+                
+                const numbers = priceText.match(/[\d.]+/g);
+                if (numbers && numbers.length >= 2) {
+                    const price = parseFloat(numbers[0]);
+                    const quantity = parseInt(numbers[1]);
+                    if (!isNaN(price) && !isNaN(quantity)) {
+                        item.textContent = `${currencySymbol}${price.toFixed(2)} × ${quantity} = ${currencySymbol}${(price * quantity).toFixed(2)}`;
+                    }
+                }
+            } catch (itemError) {
+                console.error('Error updating item price:', itemError);
+            }
+        });
+        
+        // Update other displays
+        updateTotalAmount();
+        displayReceipts();
+        updateBudgetStats();
+        
+        // Update budget display
+        const budget = parseFloat(localStorage.getItem('monthlyBudget')) || 0;
+        if (currentBudgetDisplay) {
+            currentBudgetDisplay.textContent = `${currencySymbol}${budget.toFixed(2)}`;
+        }
+        
+    } catch (error) {
+        console.error('Error updating currency displays:', error);
+    }
+  }
+
+  // Add receipt form submit handler
+  if (receiptForm) {
+    receiptForm.addEventListener('submit', handleReceiptUpload);
+  }
+
+  // Add these utility functions for concurrency control
+  function generateVersion() {
+    return Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
+  }
+
+  async function resolveConflict(localData, serverData) {
+    try {
+        // Compare timestamps and versions
+        if (!localData || !serverData) return serverData || localData;
+        
+        const localTimestamp = localData.lastUpdated || 0;
+        const serverTimestamp = serverData.lastUpdated || 0;
+        
+        // If server data is newer, use it
+        if (serverTimestamp > localTimestamp) {
+            return serverData;
+        }
+        
+        // If local data is newer, use it
+        if (localTimestamp > serverTimestamp) {
+            return localData;
+        }
+        
+        // If timestamps are equal, merge the data
+        if (localData.version !== serverData.version) {
+            // Merge receipts from both sources, removing duplicates by ID
+            const mergedReceipts = [...(serverData.receipts || [])];
+            const localReceipts = localData.receipts || [];
+            
+            localReceipts.forEach(localReceipt => {
+                if (!mergedReceipts.some(r => r.id === localReceipt.id)) {
+                    mergedReceipts.push(localReceipt);
+                }
+            });
+            
+            return {
+                ...serverData,
+                receipts: mergedReceipts,
+                version: generateVersion(),
+                lastUpdated: Date.now()
+            };
+        }
+        
+        return localData;
+    } catch (error) {
+        console.error('Error resolving conflict:', error);
+        // In case of error, return the most recent data
+        return localTimestamp > serverTimestamp ? localData : serverData;
+    }
+  }
+
+  async function syncPendingUpdates(retryCount = 3) {
+    if (!navigator.onLine || !currentUser) return;
+    
+    try {
+        const pendingUpdates = JSON.parse(localStorage.getItem('pendingUpdates') || '[]');
+        if (pendingUpdates.length === 0) return;
+        
+        const userDoc = doc(db, 'users', currentUser.uid);
+        
+        // Add retry logic for transactions
+        let attempt = 0;
+        while (attempt < retryCount) {
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const docSnap = await transaction.get(userDoc);
+                    const serverData = docSnap.exists() ? docSnap.data() : {};
+                    
+                    // Apply pending updates in order
+                    for (const update of pendingUpdates) {
+                        if (update.type === 'receipt') {
+                            serverData.receipts = serverData.receipts || [];
+                            // Check for duplicates before adding
+                            if (!serverData.receipts.some(r => r.id === update.data.id)) {
+                                serverData.receipts.push(update.data);
+                            }
+                        }
+                    }
+                    
+                    serverData.lastUpdated = Date.now();
+                    serverData.version = generateVersion();
+                    
+                    transaction.set(userDoc, serverData, { merge: true });
+                });
+                
+                // If successful, clear pending updates
+                localStorage.removeItem('pendingUpdates');
+                break;
+            } catch (transactionError) {
+                attempt++;
+                if (attempt === retryCount) {
+                    throw transactionError;
+                }
+                // Wait before retrying
+                await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            }
+        }
+    } catch (error) {
+        console.error('Error syncing pending updates:', error);
+        // Keep pending updates in localStorage for next attempt
+    }
+  }
+
+  // Add these to the init() function
+  function init() {
+    // ... existing init code ...
+
+    // Add improved error handling for online/offline status
+    window.addEventListener('online', async () => {
+        console.log('Connection restored. Syncing data...');
+        try {
+            await syncPendingUpdates();
+            console.log('Sync completed successfully');
+        } catch (error) {
+            console.error('Error during sync:', error);
         }
     });
-    
-    // Update total amount
-    updateTotalAmount();
-    
-    // Update budget displays
-    const budget = parseFloat(localStorage.getItem('monthlyBudget')) || 0;
-    if (currentBudgetDisplay) {
-        currentBudgetDisplay.textContent = `${currencySymbol}${budget.toFixed(2)}`;
-    }
-    
-    // Update receipts display
-    displayReceipts();
-    
-    // Update budget stats
-    updateBudgetStats();
-    
-    // If there are no items, update the total amount display with new currency
-    if (getItemsFromStorage().length === 0) {
-        const totalAmountElement = document.getElementById('total-amount');
-        if (totalAmountElement) {
-            totalAmountElement.innerHTML = `
-                <i class="fas fa-calculator"></i>
-                Estimated Total: ${currencySymbol}0.00
-            `;
+
+    window.addEventListener('offline', () => {
+        console.log('Device is offline. Changes will be saved locally.');
+    });
+
+    // Add periodic sync check with error handling
+    setInterval(async () => {
+        try {
+            await syncPendingUpdates();
+        } catch (error) {
+            console.error('Periodic sync failed:', error);
         }
-    }
+    }, 5 * 60 * 1000);
   }
 }
