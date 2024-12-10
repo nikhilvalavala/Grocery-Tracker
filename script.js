@@ -889,150 +889,123 @@ function init() {
     checkUI();
   }
 
+  // Add these helper functions at the top of your script
+  function compressImage(base64String, maxWidth = 800) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.src = base64String;
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+            
+            // Calculate new dimensions
+            if (width > maxWidth) {
+                height = Math.round((height * maxWidth) / width);
+                width = maxWidth;
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
+            
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            
+            // Compress as JPEG with 0.7 quality
+            resolve(canvas.toDataURL('image/jpeg', 0.7));
+        };
+        img.onerror = reject;
+    });
+  }
+
+  // Add this function to manage storage
+  async function manageStorage() {
+    const receipts = getReceipts();
+    if (receipts.length > 50) { // Keep only last 50 receipts
+        receipts.sort((a, b) => b.timestamp - a.timestamp);
+        receipts.splice(50); // Remove older receipts
+        localStorage.setItem('receipts', JSON.stringify(receipts));
+    }
+  }
+
   // Update the handleReceiptUpload function
   async function handleReceiptUpload(e) {
     e.preventDefault();
     
-    // Check if Firebase is properly initialized
-    if (!window.firebaseDb || !window.firebaseAuth) {
-        await showCustomDialog('Firebase not properly initialized. Please refresh the page.', 'alert');
-        return;
-    }
-
     try {
-        // Get form elements and validate they exist
-        const receiptNameInput = document.getElementById('receipt-name');
-        const receiptDateInput = document.getElementById('receipt-date');
-        const receiptAmountInput = document.getElementById('receipt-amount');
-        const receiptFileInput = document.getElementById('receipt-file');
-        
-        if (!receiptNameInput || !receiptDateInput || !receiptAmountInput || !receiptFileInput) {
-            throw new Error('Required form elements not found');
-        }
-        
-        // Get values
-        const receiptName = receiptNameInput.value.trim();
-        const receiptDate = receiptDateInput.value;
-        const receiptAmount = receiptAmountInput.value.trim();
-        const receiptFile = receiptFileInput.files[0];
-        
-        // Validate all fields are filled
-        const missingFields = [];
-        if (!receiptName) missingFields.push('Receipt Name');
-        if (!receiptDate) missingFields.push('Date');
-        if (!receiptAmount) missingFields.push('Amount');
-        if (!receiptFile) missingFields.push('Receipt File');
-        
-        if (missingFields.length > 0) {
-            await showCustomDialog(`Please fill in the following fields: ${missingFields.join(', ')}`, 'alert');
-            return;
-        }
+        // ... existing validation code ...
 
-        // Validate amount
-        const amount = parseFloat(receiptAmount);
-        if (isNaN(amount) || amount < 0) {
-            await showCustomDialog('Please enter a valid amount', 'alert');
-            return;
-        }
-
-        // Validate file size (5MB limit)
-        if (receiptFile.size > 5 * 1024 * 1024) {
-            await showCustomDialog('File size must be less than 5MB', 'alert');
-            return;
-        }
-
-        // Validate file type
-        const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
-        if (!allowedTypes.includes(receiptFile.type)) {
-            await showCustomDialog('Please upload a valid file (JPEG, PNG, or PDF)', 'alert');
-            return;
-        }
-
-        // Create new receipt object
-        const newReceipt = {
-            id: Date.now(),
-            name: receiptName,
-            date: receiptDate,
-            amount: amount,
-            file: await readFileAsDataURL(receiptFile),
-            type: receiptFile.type,
-            timestamp: Date.now(),
-            version: generateVersion(),
-            pendingSync: !navigator.onLine
-        };
-
-        // Get and update existing receipts
-        let existingReceipts = getReceipts();
-        existingReceipts.push(newReceipt);
-        
-        // Save to local storage
-        localStorage.setItem('receipts', JSON.stringify(existingReceipts));
-
-        // If offline, store in pending updates
-        if (!navigator.onLine) {
-            const pendingUpdates = JSON.parse(localStorage.getItem('pendingUpdates') || '[]');
-            pendingUpdates.push({
-                type: 'receipt',
-                data: newReceipt,
-                timestamp: Date.now()
+        // Compress image if it's an image file
+        let fileData;
+        if (receiptFile.type.startsWith('image/')) {
+            const reader = new FileReader();
+            fileData = await new Promise((resolve, reject) => {
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(receiptFile);
             });
-            localStorage.setItem('pendingUpdates', JSON.stringify(pendingUpdates));
             
-            await showCustomDialog('Receipt saved locally. Will sync when connection is restored.', 'info');
+            // Compress the image
+            fileData = await compressImage(fileData);
         } else {
-            // Try to sync with Firebase if online
+            // For PDFs, limit file size
+            if (receiptFile.size > 2 * 1024 * 1024) { // 2MB limit for PDFs
+                await showCustomDialog('PDF files must be under 2MB', 'alert');
+                return;
+            }
+            fileData = await readFileAsDataURL(receiptFile);
+        }
+
+        // Manage storage before adding new receipt
+        await manageStorage();
+
+        // Try to save to localStorage with error handling
+        try {
+            const newReceipt = {
+                id: Date.now(),
+                name: receiptName,
+                date: receiptDate,
+                amount: amount,
+                file: fileData,
+                type: receiptFile.type,
+                timestamp: Date.now(),
+                version: generateVersion(),
+                pendingSync: !navigator.onLine
+            };
+
+            let existingReceipts = getReceipts();
+            existingReceipts.push(newReceipt);
+            
             try {
-                if (currentUser) {
-                    const userDoc = doc(window.firebaseDb, 'users', currentUser.uid);
-                    await setDoc(userDoc, {
-                        items: getItemsFromStorage(),
-                        receipts: existingReceipts,
-                        monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
-                        lastUpdated: Date.now()
-                    }, { merge: true }); // Add merge option
-                }
-            } catch (syncError) {
-                console.error('Error syncing with server:', syncError);
-                // Store as pending update even if online sync fails
-                const pendingUpdates = JSON.parse(localStorage.getItem('pendingUpdates') || '[]');
-                pendingUpdates.push({
-                    type: 'receipt',
-                    data: newReceipt,
-                    timestamp: Date.now()
-                });
-                localStorage.setItem('pendingUpdates', JSON.stringify(pendingUpdates));
+                localStorage.setItem('receipts', JSON.stringify(existingReceipts));
+            } catch (storageError) {
+                // If storage fails, try to free up space
+                console.log('Storage failed, attempting to free space...');
+                existingReceipts = existingReceipts.slice(-30); // Keep only last 30 receipts
+                localStorage.setItem('receipts', JSON.stringify(existingReceipts));
                 
-                await showCustomDialog('Receipt saved locally. Will retry sync later.', 'info');
+                // Try one more time with the new receipt
+                existingReceipts.push(newReceipt);
+                try {
+                    localStorage.setItem('receipts', JSON.stringify(existingReceipts));
+                } catch (finalError) {
+                    throw new Error('Storage quota exceeded even after cleanup');
+                }
             }
-        }
 
-        // Show the receipts list
-        const receiptsList = document.getElementById('receipts-list');
-        const showReceiptsBtn = document.getElementById('show-receipts-btn');
-        
-        if (receiptsList) {
-            receiptsList.style.display = 'grid';
-            if (showReceiptsBtn) {
-                showReceiptsBtn.innerHTML = '<i class="fas fa-times"></i> Hide Receipts';
-            }
-        }
+            // ... rest of the function (Firebase sync, etc.) ...
 
-        // Update UI
-        displayReceipts();
-        updateBudgetStats();
-        
-        // Reset form
-        document.getElementById('receipt-form').reset();
+        } catch (error) {
+            throw new Error(`Storage error: ${error.message}`);
+        }
 
     } catch (error) {
         console.error('Error handling receipt upload:', error);
-        // More detailed error message
         let errorMessage = 'An error occurred while saving the receipt. ';
-        if (error.code) {
-            errorMessage += `Error code: ${error.code}. `;
-        }
-        if (error.message) {
-            errorMessage += `Details: ${error.message}`;
+        if (error.message.includes('quota')) {
+            errorMessage += 'Storage is full. Please delete some old receipts.';
+        } else {
+            errorMessage += error.message;
         }
         await showCustomDialog(errorMessage, 'alert');
     }
@@ -2255,4 +2228,32 @@ function init() {
 
     // Rest of your init function...
   }
+
+  // Add this function to clear old receipts
+  async function clearOldReceipts() {
+    const confirmed = await showCustomDialog(
+        'This will delete receipts older than 3 months. Continue?',
+        'confirm'
+    );
+    
+    if (confirmed) {
+        const receipts = getReceipts();
+        const threeMonthsAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
+        
+        const newReceipts = receipts.filter(receipt => 
+            receipt.timestamp > threeMonthsAgo
+        );
+        
+        localStorage.setItem('receipts', JSON.stringify(newReceipts));
+        displayReceipts();
+        
+        await showCustomDialog(
+            `Cleared ${receipts.length - newReceipts.length} old receipts`,
+            'info'
+        );
+    }
+  }
+
+  // Add this to your init function
+  document.getElementById('clear-old-receipts-btn')?.addEventListener('click', clearOldReceipts);
 }
