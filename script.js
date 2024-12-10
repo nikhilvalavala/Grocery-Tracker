@@ -893,6 +893,12 @@ function init() {
   async function handleReceiptUpload(e) {
     e.preventDefault();
     
+    // Check if Firebase is properly initialized
+    if (!window.firebaseDb || !window.firebaseAuth) {
+        await showCustomDialog('Firebase not properly initialized. Please refresh the page.', 'alert');
+        return;
+    }
+
     try {
         // Get form elements and validate they exist
         const receiptNameInput = document.getElementById('receipt-name');
@@ -921,166 +927,175 @@ function init() {
             await showCustomDialog(`Please fill in the following fields: ${missingFields.join(', ')}`, 'alert');
             return;
         }
-        
+
         // Validate amount
         const amount = parseFloat(receiptAmount);
         if (isNaN(amount) || amount < 0) {
             await showCustomDialog('Please enter a valid amount', 'alert');
             return;
         }
-        
+
         // Validate file size (5MB limit)
         if (receiptFile.size > 5 * 1024 * 1024) {
             await showCustomDialog('File size must be less than 5MB', 'alert');
             return;
         }
-        
+
         // Validate file type
         const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
         if (!allowedTypes.includes(receiptFile.type)) {
             await showCustomDialog('Please upload a valid file (JPEG, PNG, or PDF)', 'alert');
             return;
         }
-        
-        // Read file
-        let fileData;
-        try {
-            fileData = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = (event) => resolve(event.target.result);
-                reader.onerror = (error) => reject(new Error('Error reading file: ' + error.message));
-                reader.readAsDataURL(receiptFile);
-            });
-        } catch (fileError) {
-            console.error('File reading error:', fileError);
-            await showCustomDialog('Error reading file. Please try again.', 'alert');
-            return;
-        }
-        
-        // Create new receipt object with version
+
+        // Create new receipt object
         const newReceipt = {
             id: Date.now(),
             name: receiptName,
             date: receiptDate,
             amount: amount,
-            file: fileData,
+            file: await readFileAsDataURL(receiptFile),
             type: receiptFile.type,
             timestamp: Date.now(),
-            version: generateVersion()
+            version: generateVersion(),
+            pendingSync: !navigator.onLine
         };
+
+        // Get and update existing receipts
+        let existingReceipts = getReceipts();
+        existingReceipts.push(newReceipt);
         
-        // Get and update existing receipts with optimistic locking
-        let existingReceipts;
-        try {
-            // Get current server state if online
-            let serverReceipts = [];
-            if (currentUser && navigator.onLine) {
-                const userDoc = doc(db, 'users', currentUser.uid);
-                const docSnap = await getDoc(userDoc);
-                if (docSnap.exists()) {
-                    serverReceipts = docSnap.data().receipts || [];
-                }
-            }
-            
-            // Get local receipts
-            existingReceipts = getReceipts();
-            
-            // Resolve any conflicts
-            if (serverReceipts.length > 0) {
-                existingReceipts = await resolveConflict(
-                    { data: existingReceipts, lastUpdated: localStorage.getItem('lastUpdated') },
-                    { data: serverReceipts, lastUpdated: serverReceipts.lastUpdated }
-                ).data;
-            }
-            
-            // Add new receipt
-            existingReceipts.push(newReceipt);
-            
-            // Update local storage with version info
-            const updateData = {
-                receipts: existingReceipts,
-                lastUpdated: Date.now(),
-                version: generateVersion()
-            };
-            
-            localStorage.setItem('receipts', JSON.stringify(existingReceipts));
-            localStorage.setItem('lastUpdated', updateData.lastUpdated);
-            localStorage.setItem('dataVersion', updateData.version);
-            
-            // Sync with Firebase if online
-            if (currentUser && navigator.onLine) {
-                const userDoc = doc(db, 'users', currentUser.uid);
-                
-                // Use transaction for atomic updates
-                await runTransaction(db, async (transaction) => {
-                    const docSnap = await transaction.get(userDoc);
-                    
-                    if (!docSnap.exists()) {
-                        transaction.set(userDoc, {
-                            ...updateData,
-                            items: getItemsFromStorage(),
-                            monthlyBudget: localStorage.getItem('monthlyBudget') || '0'
-                        });
-                    } else {
-                        const serverData = docSnap.data();
-                        
-                        // Check if data was modified since we started
-                        if (serverData.lastUpdated > updateData.lastUpdated) {
-                            // Handle conflict
-                            const resolvedData = await resolveConflict(updateData, serverData);
-                            transaction.set(userDoc, resolvedData);
-                        } else {
-                            transaction.update(userDoc, updateData);
-                        }
-                    }
-                });
-            }
-            
-        } catch (error) {
-            console.error('Error in concurrency control:', error);
-            // Store failed updates for later sync
+        // Save to local storage
+        localStorage.setItem('receipts', JSON.stringify(existingReceipts));
+
+        // If offline, store in pending updates
+        if (!navigator.onLine) {
             const pendingUpdates = JSON.parse(localStorage.getItem('pendingUpdates') || '[]');
             pendingUpdates.push({
                 type: 'receipt',
                 data: newReceipt,
-                timestamp: Date.now(),
-                version: generateVersion()
+                timestamp: Date.now()
             });
             localStorage.setItem('pendingUpdates', JSON.stringify(pendingUpdates));
             
-            await showCustomDialog('Changes saved locally. Will sync when connection is restored.', 'alert');
-        }
-        
-        // Update UI
-        try {
-            // Show the receipts list
-            const receiptsList = document.getElementById('receipts-list');
-            const showReceiptsBtn = document.getElementById('show-receipts-btn');
-            
-            if (receiptsList) {
-                receiptsList.style.display = 'grid';
-                if (showReceiptsBtn) {
-                    showReceiptsBtn.innerHTML = '<i class="fas fa-times"></i> Hide Receipts';
+            await showCustomDialog('Receipt saved locally. Will sync when connection is restored.', 'info');
+        } else {
+            // Try to sync with Firebase if online
+            try {
+                if (currentUser) {
+                    const userDoc = doc(window.firebaseDb, 'users', currentUser.uid);
+                    await setDoc(userDoc, {
+                        items: getItemsFromStorage(),
+                        receipts: existingReceipts,
+                        monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
+                        lastUpdated: Date.now()
+                    }, { merge: true }); // Add merge option
                 }
+            } catch (syncError) {
+                console.error('Error syncing with server:', syncError);
+                // Store as pending update even if online sync fails
+                const pendingUpdates = JSON.parse(localStorage.getItem('pendingUpdates') || '[]');
+                pendingUpdates.push({
+                    type: 'receipt',
+                    data: newReceipt,
+                    timestamp: Date.now()
+                });
+                localStorage.setItem('pendingUpdates', JSON.stringify(pendingUpdates));
+                
+                await showCustomDialog('Receipt saved locally. Will retry sync later.', 'info');
             }
-            
-            // Update displays
-            displayReceipts();
-            updateBudgetStats();
-            
-            // Reset form
-            document.getElementById('receipt-form').reset();
-        } catch (uiError) {
-            console.error('UI update error:', uiError);
-            await showCustomDialog('Error updating display. Please refresh the page.', 'alert');
-            // Don't return here as the data was saved successfully
         }
+
+        // Show the receipts list
+        const receiptsList = document.getElementById('receipts-list');
+        const showReceiptsBtn = document.getElementById('show-receipts-btn');
         
+        if (receiptsList) {
+            receiptsList.style.display = 'grid';
+            if (showReceiptsBtn) {
+                showReceiptsBtn.innerHTML = '<i class="fas fa-times"></i> Hide Receipts';
+            }
+        }
+
+        // Update UI
+        displayReceipts();
+        updateBudgetStats();
+        
+        // Reset form
+        document.getElementById('receipt-form').reset();
+
     } catch (error) {
-        console.error('Critical error in receipt upload:', error);
-        await showCustomDialog('An unexpected error occurred. Please try again.', 'alert');
+        console.error('Error handling receipt upload:', error);
+        // More detailed error message
+        let errorMessage = 'An error occurred while saving the receipt. ';
+        if (error.code) {
+            errorMessage += `Error code: ${error.code}. `;
+        }
+        if (error.message) {
+            errorMessage += `Details: ${error.message}`;
+        }
+        await showCustomDialog(errorMessage, 'alert');
     }
 }
+
+  // Add this helper function to read files
+  function readFileAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Error reading file'));
+        reader.readAsDataURL(file);
+    });
+  }
+
+  // Update the showCustomDialog function to support different types
+  function showCustomDialog(message, type = 'confirm') {
+    return new Promise((resolve) => {
+        const dialog = document.createElement('div');
+        dialog.className = 'custom-dialog';
+        
+        const icon = type === 'info' ? 'fa-info-circle' : 
+                    type === 'alert' ? 'fa-exclamation-triangle' : 
+                    'fa-question-circle';
+        
+        const color = type === 'info' ? '#1976d2' : 
+                     type === 'alert' ? '#d32f2f' : 
+                     '#1a237e';
+        
+        dialog.innerHTML = `
+            <div class="dialog-content">
+                <i class="fas ${icon}" style="color: ${color}; font-size: 24px; margin-bottom: 15px;"></i>
+                <h3>${message}</h3>
+                <div class="dialog-buttons">
+                    ${type === 'confirm' ? '<button class="btn-no">No</button>' : ''}
+                    <button class="btn-yes">${type === 'confirm' ? 'Yes' : 'OK'}</button>
+                </div>
+            </div>
+        `;
+        
+        // Add overlay
+        const overlay = document.createElement('div');
+        overlay.className = 'dialog-overlay';
+        
+        document.body.appendChild(overlay);
+        document.body.appendChild(dialog);
+        
+        // Add event listeners
+        if (type === 'confirm') {
+            dialog.querySelector('.btn-no').addEventListener('click', () => {
+                dialog.remove();
+                overlay.remove();
+                resolve(false);
+            });
+        }
+        
+        dialog.querySelector('.btn-yes').addEventListener('click', () => {
+            dialog.remove();
+            overlay.remove();
+            resolve(true);
+        });
+    });
+  }
 
   // Update the displayReceipts function
   function displayReceipts() {
@@ -2222,5 +2237,22 @@ function init() {
             console.error('Periodic sync failed:', error);
         }
     }, 5 * 60 * 1000);
+  }
+
+  // Add this helper function
+  function isFirebaseInitialized() {
+    return !!(window.firebaseDb && window.firebaseAuth && window.firebaseProvider);
+  }
+
+  // Add this to your init function
+  function init() {
+    // Add this check at the start
+    if (!isFirebaseInitialized()) {
+      console.error('Firebase not properly initialized');
+      showCustomDialog('Application not properly initialized. Please refresh the page.', 'alert');
+      return;
+    }
+
+    // Rest of your init function...
   }
 }

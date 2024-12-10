@@ -328,8 +328,8 @@
     <script type="module">
       // Import the functions you need from the SDKs you need
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-      import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-      import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+      import { getAuth, GoogleAuthProvider } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+      import { getFirestore, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
       const firebaseConfig = {
         apiKey: "AIzaSyB5GLZFd4-QmG2tLPKmbd5RdojtC5EWb3U",
@@ -341,17 +341,32 @@
         measurementId: "G-5LCJYV2X1Y"
       };
 
-      // Initialize Firebase
-      const app = initializeApp(firebaseConfig);
-      const auth = getAuth(app);
-      const provider = new GoogleAuthProvider();
-      const db = getFirestore(app);
+      try {
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const provider = new GoogleAuthProvider();
+        const db = getFirestore(app);
 
-      // Make Firebase instances available globally
-      window.firebaseApp = app;
-      window.firebaseAuth = auth;
-      window.firebaseProvider = provider;
-      window.firebaseDb = db;
+        // Enable offline persistence
+        enableIndexedDbPersistence(db).catch((err) => {
+          if (err.code == 'failed-precondition') {
+            console.warn('Multiple tabs open, persistence can only be enabled in one tab at a time.');
+          } else if (err.code == 'unimplemented') {
+            console.warn('The current browser doesn\'t support persistence');
+          }
+        });
+
+        // Make Firebase instances available globally
+        window.firebaseApp = app;
+        window.firebaseAuth = auth;
+        window.firebaseProvider = provider;
+        window.firebaseDb = db;
+
+        console.log('Firebase initialized successfully');
+      } catch (error) {
+        console.error('Error initializing Firebase:', error);
+      }
     </script>
 
     <script type="module" src="script.js"></script>
