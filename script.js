@@ -332,6 +332,10 @@ function init() {
     } else if (targetElement.classList.contains('move-item') || 
                targetElement.querySelector('.fa-check')) {
         showMoveDialog(listItem);
+    } else if (targetElement.classList.contains('complete-item')) {
+        moveItemToHistory(listItem, 'completed');
+    } else if (targetElement.classList.contains('waste-item')) {
+        moveItemToHistory(listItem, 'wasted');
     }
   }
 
@@ -588,6 +592,14 @@ function init() {
                 '<button class="move-item btn-link"><i class="fa-solid fa-check"></i></button>' 
                 : ''
             }
+            ${status === 'current' ? `
+                <button class="complete-item btn-link" title="Mark as Completed">
+                    <i class="fa-solid fa-check-circle"></i>
+                </button>
+                <button class="waste-item btn-link" title="Mark as Wasted">
+                    <i class="fa-solid fa-trash-alt"></i>
+                </button>
+            ` : ''}
             <button class="edit-item btn-link">
                 <i class="fa-solid fa-pen"></i>
             </button>
@@ -1060,18 +1072,24 @@ function init() {
             const showReceiptsBtn = document.getElementById('show-receipts-btn');
             
             if (receiptsList) {
-                receiptsList.style.display = 'grid';
+                receiptsList.style.display = 'none';  // Hide the receipts list
                 if (showReceiptsBtn) {
-                    showReceiptsBtn.innerHTML = '<i class="fas fa-times"></i> Hide Receipts';
+                    showReceiptsBtn.innerHTML = '<i class="fas fa-receipt"></i> View Receipts';  // Reset button text
                 }
+            }
+
+            // Reset form fields
+            document.getElementById('receipt-form').reset();
+            
+            // Clear file input (since .reset() doesn't always clear it in all browsers)
+            const fileInput = document.getElementById('receipt-file');
+            if (fileInput) {
+                fileInput.value = '';
             }
 
             // Update UI
             displayReceipts();
             updateBudgetStats();
-            
-            // Reset form
-            document.getElementById('receipt-form').reset();
 
         } catch (error) {
             throw new Error(`Storage error: ${error.message}`);
@@ -2209,6 +2227,39 @@ function init() {
     }
   }
 
+  // Add this function to handle real-time syncing
+  async function setupRealtimeSync() {
+    if (!currentUser || !window.firebaseDb) return;
+
+    const userDoc = doc(window.firebaseDb, 'users', currentUser.uid);
+    
+    // Set up real-time listener
+    return onSnapshot(userDoc, (doc) => {
+        if (doc.exists()) {
+            const serverData = doc.data();
+            const localTimestamp = parseInt(localStorage.getItem('lastUpdated')) || 0;
+            
+            // Only update if server data is newer
+            if (serverData.lastUpdated > localTimestamp) {
+                // Update local storage
+                localStorage.setItem('items', JSON.stringify(serverData.items || []));
+                localStorage.setItem('receipts', JSON.stringify(serverData.receipts || []));
+                localStorage.setItem('monthlyBudget', serverData.monthlyBudget || '0');
+                localStorage.setItem('lastUpdated', serverData.lastUpdated.toString());
+
+                // Update UI
+                displayItems();
+                displayReceipts();
+                updateBudgetStats();
+                console.log('Data synced from server:', new Date().toISOString());
+            }
+        }
+    }, (error) => {
+        console.error('Error in real-time sync:', error);
+    });
+  }
+
+  // Update the syncPendingUpdates function
   async function syncPendingUpdates(retryCount = 3) {
     if (!navigator.onLine || !currentUser) return;
     
@@ -2216,105 +2267,116 @@ function init() {
         const pendingUpdates = JSON.parse(localStorage.getItem('pendingUpdates') || '[]');
         if (pendingUpdates.length === 0) return;
         
-        const userDoc = doc(db, 'users', currentUser.uid);
+        const userDoc = doc(window.firebaseDb, 'users', currentUser.uid);
         
-        // Add retry logic for transactions
+        // Add retry logic with exponential backoff
         let attempt = 0;
         while (attempt < retryCount) {
             try {
-                await runTransaction(db, async (transaction) => {
+                await runTransaction(window.firebaseDb, async (transaction) => {
                     const docSnap = await transaction.get(userDoc);
-                    const serverData = docSnap.exists() ? docSnap.data() : {};
+                    let serverData = docSnap.exists() ? docSnap.data() : {};
                     
-                    // Apply pending updates in order
-                    for (const update of pendingUpdates) {
+                    // Merge server and local data
+                    serverData.items = serverData.items || [];
+                    serverData.receipts = serverData.receipts || [];
+                    
+                    // Apply pending updates
+                    pendingUpdates.forEach(update => {
                         if (update.type === 'receipt') {
-                            serverData.receipts = serverData.receipts || [];
-                            // Check for duplicates before adding
-                            if (!serverData.receipts.some(r => r.id === update.data.id)) {
+                            // Avoid duplicates
+                            const index = serverData.receipts.findIndex(r => r.id === update.data.id);
+                            if (index === -1) {
                                 serverData.receipts.push(update.data);
                             }
                         }
-                    }
+                    });
                     
                     serverData.lastUpdated = Date.now();
-                    serverData.version = generateVersion();
                     
                     transaction.set(userDoc, serverData, { merge: true });
                 });
                 
-                // If successful, clear pending updates
+                // Clear pending updates after successful sync
                 localStorage.removeItem('pendingUpdates');
+                console.log('Sync completed successfully:', new Date().toISOString());
                 break;
-            } catch (transactionError) {
+                
+            } catch (error) {
                 attempt++;
-                if (attempt === retryCount) {
-                    throw transactionError;
-                }
-                // Wait before retrying
-                await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+                if (attempt === retryCount) throw error;
+                // Exponential backoff
+                await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
             }
         }
     } catch (error) {
-        console.error('Error syncing pending updates:', error);
-        // Keep pending updates in localStorage for next attempt
+        console.error('Sync failed after retries:', error);
+        throw error;
     }
   }
 
-  // Add these to the init() function
+  // Update the init function
   function init() {
-    // ... existing init code ...
+    if (!isFirebaseInitialized()) {
+        console.error('Firebase not properly initialized');
+        showCustomDialog('Application not properly initialized. Please refresh the page.', 'alert');
+        return;
+    }
 
-    // Add improved error handling for online/offline status
+    // Set up real-time sync
+    let unsubscribeSync = null;
+    
+    auth.onAuthStateChanged(async (user) => {
+        if (user) {
+            try {
+                // Set up real-time sync
+                unsubscribeSync = await setupRealtimeSync();
+                
+                // Initial sync
+                await syncPendingUpdates();
+            } catch (error) {
+                console.error('Error setting up sync:', error);
+            }
+        } else if (unsubscribeSync) {
+            unsubscribeSync();
+            unsubscribeSync = null;
+        }
+    });
+
+    // Improved online/offline handling
     window.addEventListener('online', async () => {
         console.log('Connection restored. Syncing data...');
         try {
             await syncPendingUpdates();
-            console.log('Sync completed successfully');
+            await showCustomDialog('Connection restored. Data synced successfully.', 'info');
         } catch (error) {
             console.error('Error during sync:', error);
+            await showCustomDialog('Error syncing data. Will retry automatically.', 'alert');
         }
     });
 
-    window.addEventListener('offline', () => {
+    window.addEventListener('offline', async () => {
         console.log('Device is offline. Changes will be saved locally.');
+        await showCustomDialog('You are offline. Changes will be saved locally and synced when connection is restored.', 'info');
     });
 
-    // Add periodic sync check with error handling
+    // More frequent sync checks for pending updates
     setInterval(async () => {
-        try {
-            await syncPendingUpdates();
-        } catch (error) {
-            console.error('Periodic sync failed:', error);
+        if (navigator.onLine && currentUser) {
+            try {
+                await syncPendingUpdates();
+            } catch (error) {
+                console.error('Periodic sync failed:', error);
+            }
         }
-    }, 5 * 60 * 1000);
+    }, 30 * 1000); // Check every 30 seconds
 
-    // Initialize the observer
-    const domObserver = initializeDOMObserver();
-
-    // Clean up function (if needed)
-    window.addEventListener('unload', () => {
-        if (domObserver) {
-            domObserver.disconnect();
-        }
-    });
+    // ... rest of your init code ...
   }
 
   // Add this helper function
   function isFirebaseInitialized() {
     return !!(window.firebaseDb && window.firebaseAuth && window.firebaseProvider);
-  }
-
-  // Add this to your init function
-  function init() {
-    // Add this check at the start
-    if (!isFirebaseInitialized()) {
-      console.error('Firebase not properly initialized');
-      showCustomDialog('Application not properly initialized. Please refresh the page.', 'alert');
-      return;
-    }
-
-    // Rest of your init function...
   }
 
   // Replace any DOMSubtreeModified event listeners with MutationObserver
@@ -2355,5 +2417,69 @@ function init() {
     });
 
     return observer;
+  }
+
+  // Add this new function to handle moving items to completed/wasted
+  async function moveItemToHistory(item, historyType) {
+    const itemName = item.querySelector('.item-name').textContent;
+    const itemQuantity = parseInt(item.querySelector('.item-quantity').textContent);
+    const itemExpiry = item.querySelector('.item-expiry')?.textContent || '';
+    
+    // Create history item with timestamp
+    const historyItem = {
+        name: itemName,
+        quantity: itemQuantity,
+        expiry: itemExpiry,
+        movedDate: new Date().toISOString(),
+        type: historyType
+    };
+    
+    // Get existing history items
+    let historyItems = JSON.parse(localStorage.getItem('historyItems') || '[]');
+    historyItems.push(historyItem);
+    localStorage.setItem('historyItems', JSON.stringify(historyItems));
+    
+    // Remove item from current list
+    await removeItemFromStorage(itemName);
+    item.remove();
+    
+    // Add to appropriate history list
+    const targetList = document.getElementById(`${historyType}-list`);
+    const historyLi = document.createElement('li');
+    historyLi.innerHTML = `
+        <div class="item-details">
+            <div class="item-name">${itemName}</div>
+            <div class="item-info">
+                <span class="item-quantity">${itemQuantity} units</span>
+                <span class="history-date">Moved on: ${new Date().toLocaleDateString()}</span>
+            </div>
+        </div>
+        <div class="item-actions">
+            <button class="remove-item btn-link text-red">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+    `;
+    
+    targetList.appendChild(historyLi);
+    checkUI();
+    updateBudgetStats();
+    
+    // Sync with Firebase if user is logged in
+    if (currentUser) {
+        try {
+            const userDoc = doc(db, 'users', currentUser.uid);
+            await setDoc(userDoc, {
+                items: getItemsFromStorage(),
+                receipts: getReceipts(),
+                historyItems: historyItems,
+                monthlyBudget: localStorage.getItem('monthlyBudget') || '0',
+                lastUpdated: Date.now()
+            });
+        } catch (error) {
+            console.error('Error syncing history:', error);
+            await showCustomDialog('Error syncing history. Please try again.', 'alert');
+        }
+    }
   }
 }
